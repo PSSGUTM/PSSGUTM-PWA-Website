@@ -1,0 +1,13 @@
+name: keepalive
+# Ping backend setiap 10 minit supaya Render percuma tak tidur
+# (scheduler: jana tempahan, finalise auto, peringatan bayaran hanya jalan bila server hidup).
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping backend
+        run: curl -fsS --retry 3 --max-time 60 "${{ secrets.BACKEND_URL }}/health"

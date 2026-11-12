@@ -1,0 +1,12 @@
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+sqlalchemy==2.0.35
+pydantic[email]==2.9.2
+python-dotenv==1.0.1
+bcrypt==4.2.0
+PyJWT==2.9.0
+APScheduler==3.10.4
+python-multipart==0.0.12
+pillow==10.4.0
+segno==1.6.1
+openpyxl==3.1.5

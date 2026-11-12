@@ -1,0 +1,38 @@
+# Untuk jalankan penuh (backend + PostgreSQL) di satu server/VPS.
+# Salin .env.example ke .env dan isi nilai sebenar dulu.
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: pssgutm
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: pssgutm
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  backend:
+    build: ./backend
+    restart: unless-stopped
+    depends_on: [db]
+    environment:
+      ENV: production
+      DATABASE_URL: postgresql+psycopg2://pssgutm:${DB_PASSWORD}@db:5432/pssgutm
+      SECRET_KEY: ${SECRET_KEY}
+      CORS_ORIGINS: ${CORS_ORIGINS}
+      FEE_DEKAT: ${FEE_DEKAT:-3}
+      FEE_JAUH: ${FEE_JAUH:-4}
+      FEE_MOTOR_DEKAT: ${FEE_MOTOR_DEKAT:-1}
+      FEE_MOTOR_JAUH: ${FEE_MOTOR_JAUH:-2}
+      REQUIRE_ROSTER: ${REQUIRE_ROSTER:-true}
+      UPLOAD_DIR: /srv/uploads
+      ADMIN_EMAIL: ${ADMIN_EMAIL}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+    volumes:
+      - uploads:/srv/uploads
+    ports:
+      - "8000:8000"
+
+volumes:
+  pgdata:
+  uploads:
