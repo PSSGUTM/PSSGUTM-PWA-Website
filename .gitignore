@@ -14,3 +14,6 @@ __pycache__/
 node_modules/
 dist/
 .DS_Store
+
+desktop.ini
+*.orig.pdf
