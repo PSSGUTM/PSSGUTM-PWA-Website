@@ -9,9 +9,9 @@ PWA pengangkutan latihan Prebet Silat PSSGUTM BKK (UTM). Ahli tempah pergi/balik
 
 ## Stack & deploy
 - Backend: FastAPI + SQLAlchemy 2 + Pydantic 2 + APScheduler (`backend/app/`). Hos: Render (percuma). DB: Supabase PostgreSQL. Fail (resit/QR/logo): Supabase Storage.
-- Frontend: React 18 + Vite + react-router 6, PWA (`frontend/src/`). Hos: Vercel.
+- Frontend: React 18 + Vite + react-router 6, PWA (`frontend/src/`). Hos: Render (Static Site).
 - Keepalive: GitHub Actions ping `/health` setiap 10 minit (`.github/workflows/keepalive.yml`) — scheduler hanya jalan bila server hidup.
-- Push ke `main` = auto-deploy (Render + Vercel).
+- Push ke `main` = auto-deploy (Render Backend + Render Frontend).
 
 ## Arahan
 ```bash

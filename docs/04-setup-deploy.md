@@ -7,8 +7,7 @@
 |---|---|---|
 | GitHub (repo PRIVATE) | Simpan kod, Actions keepalive | Percuma |
 | Supabase | PostgreSQL + Storage (bucket `uploads`) | Percuma |
-| Render | Hos backend FastAPI | Percuma (tidur jika tiada trafik; keepalive) |
-| Vercel | Hos frontend | Percuma |
+| Render | Hos backend FastAPI & frontend Static Site | Percuma (tidur jika tiada trafik; keepalive) |
 | Brevo (pilihan) | Emel lupa kata laluan | Percuma (had harian) |
 | Google Cloud (pilihan) | Log masuk Google | Percuma |
 
@@ -30,8 +29,8 @@ Environment variables (minimum):
 | `DATABASE_URL` | dari Supabase |
 | `SUPABASE_URL`, `SUPABASE_SERVICE_KEY` (`SUPABASE_BUCKET`=`uploads`) | dari Supabase |
 | `ADMIN_EMAIL`, `ADMIN_PASSWORD` | admin pertama (dibuat sekali semasa seed) |
-| `CORS_ORIGINS` | URL Vercel, cth `https://nama.vercel.app` (koma untuk banyak) |
-| `FRONTEND_URL` | URL Vercel (untuk pautan dalam emel) |
+| `CORS_ORIGINS` | URL frontend Render, cth `https://pssgutm-app.onrender.com` (koma untuk banyak) |
+| `FRONTEND_URL` | URL frontend Render (untuk pautan dalam emel) |
 | `REQUIRE_ROSTER` | `true` |
 | `ALLOW_RESET` | `false` (hidupkan hanya semasa reset, kemudian matikan) |
 | `BREVO_API_KEY`, `MAIL_FROM` | emel lupa kata laluan (lihat bawah) |
@@ -39,8 +38,10 @@ Environment variables (minimum):
 Senarai penuh + lalai: `.env.example` dan `backend/app/config.py`.
 **Start Command yang digunakan: `python -m app.seed && uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 1`.** Jadi seed (data asas kolej, checkpoint, tempat, sesi, admin pertama) jalan **automatik setiap deploy/restart**, dan mesti selamat diulang (idempotent). Seed gagal = server tak mula (lihat [05 Operasi](05-operasi-bkk.md), "Port scan timeout"). Pada permulaan app juga jalankan `create_all` + `run_migrations()`. Selepas deploy pertama, import senarai ahli di Admin › Lagi › Senarai ahli sah.
 
-## Langkah 4 — Vercel (frontend)
-Import repo › Root Directory `frontend` › Framework Vite (build `npm run build`, output `dist`). Env: `VITE_API_URL` = URL Render. `vercel.json` sudah ada (rewrite SPA). Selepas tukar env, **Redeploy**.
+## Langkah 4 — Render (frontend Static Site)
+New › Static Site › sambung repo. Root Directory `frontend`. Build Command `npm run build`, Publish Directory `dist`.
+Env: `VITE_API_URL` = URL Backend Render (cth `https://pssgutm-pwa-website.onrender.com`).
+Tambah Rewrite Rule di tab Redirects/Rewrites: Type `Rewrite`, Source `/*`, Destination `/index.html`. Selepas deploy, salin URL frontend ke `CORS_ORIGINS` & `FRONTEND_URL` di Backend Render.
 
 ## Langkah 5 — Emel lupa kata laluan (Brevo)
 Render percuma **menyekat SMTP**, jadi guna Brevo HTTP API. Daftar Brevo › **sahkan emel penghantar** (Senders) › cipta **API key** › isi `BREVO_API_KEY`, `MAIL_FROM` (mesti emel yang disahkan), `FRONTEND_URL`. Ujian: Lupa kata laluan di app. Jika gagal, lihat log Render: carian "Brevo" menunjukkan sebab (sender belum disahkan, kunci salah, dsb.). Tanpa konfigurasi ini permintaan pergi kepada admin (bukan emel).

@@ -1,7 +1,7 @@
 # PSSGUTM Transport
 
 PWA pengangkutan latihan Prebet Silat PSSGUTM (Rabu & Sabtu 9-11 PM): ahli tempah, prebet bawa, admin BKK susun & sahkan, bendahari bayar prebet.
-Stack: FastAPI + SQLAlchemy (Render + Supabase) · React + Vite PWA (Vercel) · GitHub Actions keepalive.
+Stack: FastAPI + SQLAlchemy (Render + Supabase) · React + Vite PWA (Render Static Site) · GitHub Actions keepalive.
 
 > **Repo ini mesti PRIVATE.** Jangan commit `.env`, senarai ahli, `uploads/` atau kunci API.
 

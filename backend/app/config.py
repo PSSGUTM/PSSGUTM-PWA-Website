@@ -56,7 +56,7 @@ SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
 SMTP_USER = os.getenv("SMTP_USER", "")
 SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
 SMTP_FROM = os.getenv("SMTP_FROM", "") or MAIL_FROM or os.getenv("SMTP_USER", "")
-FRONTEND_URL = os.getenv("FRONTEND_URL", "").rstrip("/")            # cth https://pssgutm.vercel.app (untuk pautan dalam emel)
+FRONTEND_URL = os.getenv("FRONTEND_URL", "").rstrip("/")            # cth https://pssgutm-app.onrender.com (untuk pautan dalam emel)
 RESET_TOKEN_MINUTES = int(os.getenv("RESET_TOKEN_MINUTES", "60"))
 
 UPLOAD_DIR = os.getenv("UPLOAD_DIR", "./uploads")
