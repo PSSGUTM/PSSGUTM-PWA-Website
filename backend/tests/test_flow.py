@@ -930,8 +930,13 @@ def test_cutoff_5pm_blocks_members_not_admin(client, monkeypatch):
     h, uid = make_user(client, 1)
     ev = first_event(client, admin)
     d = datetime.fromisoformat(ev["training_date"]).date()
+    from app.database import SessionLocal
+    from app.models import TrainingEvent
+    _db = SessionLocal()
+    _sess_id = _db.get(TrainingEvent, ev["event_id"]).session_id
+    _db.close()
     monkeypatch.setattr(svc, "now_my", lambda: datetime.combine(d, datetime.min.time()).replace(hour=17, minute=30))
-    r = client.put("/transport/dates", headers=h, json={"training_date": ev["training_date"], "session_id": 1,
+    r = client.put("/transport/dates", headers=h, json={"training_date": ev["training_date"], "session_id": _sess_id,
                                                         "going": True, "returning": True})
     assert r.status_code == 400 and "ditutup" in r.json()["detail"]
 
