@@ -10,8 +10,24 @@ export default function Beranda() {
   const [fav, setFav] = useState(loadFav());
   const [data, setData] = useState(null);
   const [unread, setUnread] = useState(0);
-  const user = auth.get()?.user;
-  const incomplete = user && (!user.phone || user.phone === "0000000000" || !user.college_id || !user.block);
+  const [profile, setProfile] = useState(auth.get()?.user);
+
+  useEffect(() => {
+    api.get("/profile").then((p) => {
+      const cur = auth.get();
+      if (cur) auth.set({ ...cur, user: { ...cur.user, ...p } });
+      setProfile(p);
+    }).catch(() => {});
+  }, []);
+
+  const isIncomplete = (u) => {
+    if (!u || u.role === "admin") return false;
+    const noPhone = !u.phone || u.phone.trim() === "" || u.phone === "0000000000";
+    const noCollege = !u.college_id && !u.college_other;
+    const noBlock = u.college_id && (!u.block || u.block.trim() === "");
+    return noPhone || noCollege || noBlock;
+  };
+  const incomplete = isIncomplete(profile);
 
   useEffect(() => {
     const f = () => setFav(loadFav());

@@ -9,7 +9,15 @@ export default function Pengangkutan({ user }) {
   const next = (days || []).find((d) => !d.past);
   const st = !next ? null : next.event_status === "finalised" ? "Senarai disahkan" : "Senarai belum disahkan";
   const mine = next ? next.trips.filter((t) => t.status === "confirmed").length : 0;
-  const incomplete = user && (!user.phone || user.phone === "0000000000" || !user.college_id || !user.block);
+
+  const isIncomplete = (u) => {
+    if (!u || u.role === "admin") return false;
+    const noPhone = !u.phone || u.phone.trim() === "" || u.phone === "0000000000";
+    const noCollege = !u.college_id && !u.college_other;
+    const noBlock = u.college_id && (!u.block || u.block.trim() === "");
+    return noPhone || noCollege || noBlock;
+  };
+  const incomplete = isIncomplete(user);
 
   return (
     <div>
