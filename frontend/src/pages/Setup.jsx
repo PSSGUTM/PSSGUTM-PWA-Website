@@ -182,16 +182,12 @@ export default function Setup({ onProfile }) {
           <input placeholder="Nama kolej / tempat tinggal" maxLength={60} value={profile.college_other || ""}
                  onChange={(e) => setProfile({ ...profile, college_other: e.target.value })} />
         )}
-        {profile.role !== "driver" || profile.passenger_ok ? (
-          <>
-            {cp.points.length > 1 && (
-              <select value={profile.pickup_point_id || ""} onChange={(e) => setProfile({ ...profile, pickup_point_id: Number(e.target.value) })}>
-                {cp.points.map((p) => <option key={p.id} value={p.id}>📍 {p.name}</option>)}
-              </select>
-            )}
-            <input placeholder="Blok / bilik (cth B-12-3)" maxLength={40} value={profile.block || ""} onChange={(e) => setProfile({ ...profile, block: e.target.value })} />
-          </>
-        ) : null}
+        {cp.points.length > 1 && (profile.role !== "driver" || profile.passenger_ok) && (
+          <select value={profile.pickup_point_id || ""} onChange={(e) => setProfile({ ...profile, pickup_point_id: Number(e.target.value) })}>
+            {cp.points.map((p) => <option key={p.id} value={p.id}>📍 {p.name}</option>)}
+          </select>
+        )}
+        <input placeholder="Blok / bilik (cth B-12-3)" maxLength={40} value={profile.block || ""} onChange={(e) => setProfile({ ...profile, block: e.target.value })} />
         <p className="muted small">{profile.member_no} · {profile.email}</p>
         {profile.credit_balance > 0 && <p className="okmsg small">Kredit anda: RM{profile.credit_balance.toFixed(2)} (digunakan automatik pada latihan seterusnya)</p>}
       </section>

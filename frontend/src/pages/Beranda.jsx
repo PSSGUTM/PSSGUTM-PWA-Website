@@ -24,6 +24,9 @@ export default function Beranda() {
     if (!u || u.role === "admin") return false;
     const noPhone = !u.phone || u.phone.trim() === "" || u.phone === "0000000000";
     const noCollege = !u.college_id && !u.college_other;
+    if (u.role === "driver") {
+      return noPhone || noCollege;
+    }
     const noBlock = u.college_id && (!u.block || u.block.trim() === "");
     return noPhone || noCollege || noBlock;
   };
