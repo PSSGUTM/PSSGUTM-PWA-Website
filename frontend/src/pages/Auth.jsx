@@ -109,7 +109,7 @@ export default function Auth({ onAuth, brand, initialMode = "login" }) {
       <div className="auth-hero">
         <Link to="/" className="back">← Laman utama</Link>
         <BrandMark brand={brand} size={84} />
-        <h1>{brand?.brand_name || "PSSGUTM Transport"}</h1>
+        <h1>{brand?.brand_name || "PSSGUTM"}</h1>
         <p>{mode === "login" ? "Selamat kembali ke gelanggang." : "Daftar sekali, urusan pengangkutan kami uruskan."}</p>
       </div>
       <div className="motif-strip" />

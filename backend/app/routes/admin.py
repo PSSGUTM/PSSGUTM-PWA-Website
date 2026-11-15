@@ -920,6 +920,29 @@ def _upsert_roster(db, colleges, member_no, name, gender, college_code, active: 
         r.active = True if active is None else active
     elif active is not None:
         r.active = active          # import CSV hantar None: ahli yang dinyahaktifkan kekal nyahaktif
+
+    # Selaraskan secara automatik ke jadual Person (Pengurusan Persatuan)
+    try:
+        from ..models_main import Person
+        p = db.query(Person).filter_by(member_no=member_no).first()
+        if p is None:
+            intake = member_no[2:6] if member_no.startswith("SG") and len(member_no) >= 6 else "2627"
+            p = Person(member_no=member_no, email=f"{member_no.lower()}@pssgutm.local",
+                       name=(name or "").strip() or member_no, intake=intake,
+                       kind="SSG" if member_no.startswith("SSG") else "SG",
+                       active=True if active is None else active)
+            db.add(p)
+        if (name or "").strip():
+            p.name = (name or "").strip()
+        if g:
+            p.gender = g.value
+        if col:
+            p.college = col.code
+        if active is not None:
+            p.active = active
+    except Exception:
+        pass
+
     return created
 
 

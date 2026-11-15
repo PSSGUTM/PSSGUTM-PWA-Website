@@ -50,7 +50,7 @@ MEMBER_NO_PATTERN = os.getenv("MEMBER_NO_PATTERN", r"^SG\d{7}$")
 # Pilihan 2: SMTP (tidak berfungsi pada Render percuma). Kalau tiada satu pun diset, permintaan dihantar kepada admin.
 BREVO_API_KEY = os.getenv("BREVO_API_KEY", "")
 MAIL_FROM = os.getenv("MAIL_FROM", "")
-MAIL_FROM_NAME = os.getenv("MAIL_FROM_NAME", "PSSGUTM Transport")
+MAIL_FROM_NAME = os.getenv("MAIL_FROM_NAME", "PSSGUTM")
 SMTP_HOST = os.getenv("SMTP_HOST", "")
 SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
 SMTP_USER = os.getenv("SMTP_USER", "")

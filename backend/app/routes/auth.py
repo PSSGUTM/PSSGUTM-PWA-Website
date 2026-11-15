@@ -237,7 +237,7 @@ def forgot_password(data: ForgotIn, db: Session = Depends(get_db)):
                                     expires_at=datetime.utcnow() + timedelta(minutes=config.RESET_TOKEN_MINUTES)))
         link = f"{_reset_base_url()}/reset-password?token={token}"
         sent = mailer.send_mail(
-            user.email, "Set semula kata laluan PSSGUTM Transport",
+            user.email, "Set semula kata laluan PSSGUTM",
             f"Salam {user.name},\n\nKlik pautan ini untuk tetapkan kata laluan baharu "
             f"(sah {config.RESET_TOKEN_MINUTES} minit, sekali guna):\n{link}\n\n"
             "Jika bukan anda yang meminta, abaikan emel ini.")

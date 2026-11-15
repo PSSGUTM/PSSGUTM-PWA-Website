@@ -74,6 +74,26 @@ def update_profile(data: ProfileUpdate, user: models.User = Depends(get_current_
             ev = svc.event_on(db, ev_b.training_date)
             if ev is not None and ev.status == models.EventStatus.open:
                 ev_b.pickup_point_id = user.pickup_point_id
+
+    # Selaraskan profil ke jadual Person (Pengurusan Persatuan)
+    try:
+        from sqlalchemy import func, or_
+        from ..models_main import Person
+        person = db.query(Person).filter(or_(func.lower(Person.email) == user.email.lower(),
+                                             Person.member_no == user.member_no)).first()
+        col_code = db.get(models.College, user.college_id).code if user.college_id else ""
+        if person:
+            person.name = user.name
+            person.phone = user.phone
+            if col_code:
+                person.college = col_code
+            if user.block:
+                person.block = user.block
+            if user.gender and not person.gender:
+                person.gender = user.gender.value
+    except Exception:
+        pass
+
     db.commit()
     if user.role == models.Role.driver:
         svc.sync_driver_vehicles(db, user)

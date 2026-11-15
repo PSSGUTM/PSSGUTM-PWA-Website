@@ -229,6 +229,27 @@ def _sg_numbers(db) -> set[str]:
     return {n for (n,) in db.query(Person.member_no).filter(Person.member_no.like("SG%")) if n}
 
 
+def sync_person_to_roster(db: Session, p: Person):
+    """Selaraskan rekod Person ke MemberRoster (Transport) supaya ahli terus layak guna pengangkutan."""
+    try:
+        if not p.member_no or p.kind != "SG":
+            return
+        mno = p.member_no.strip().upper()
+        col = db.query(models.College).filter_by(code=p.college.upper()).first() if p.college else None
+        r = db.query(models.MemberRoster).filter_by(member_no=mno).first()
+        if r is None:
+            r = models.MemberRoster(member_no=mno)
+            db.add(r)
+        r.name = p.name or r.name
+        if p.gender in ("male", "female"):
+            r.gender = models.Gender(p.gender)
+        if col:
+            r.college_id = col.id
+        r.active = p.active
+    except Exception:
+        pass
+
+
 @router.get("/people", dependencies=[Depends(require_admin)])
 def list_people(q: str = "", kind: str = "", due: bool = False, limit: int = 300, offset: int = 0,
                 db: Session = Depends(get_db)):
@@ -272,6 +293,7 @@ def create_person(data: PersonIn, db: Session = Depends(get_db)):
     db.flush()
     if p.belt_id:
         db.add(BeltHistory(person_id=p.id, belt_id=p.belt_id, on_date=p.belt_date))
+    sync_person_to_roster(db, p)
     db.commit()
     return person_out(db, p)
 
@@ -288,6 +310,7 @@ def update_person(pid: int, data: PersonIn, db: Session = Depends(get_db)):
     _apply(db, p, data, _sg_numbers(db))
     if p.belt_id and (p.belt_id, p.belt_date) != prev:
         db.add(BeltHistory(person_id=p.id, belt_id=p.belt_id, on_date=p.belt_date))
+    sync_person_to_roster(db, p)
     db.commit()
     return person_out(db, p)
 
@@ -422,10 +445,128 @@ async def import_xlsx(file: UploadFile = File(...), dry_run: bool = Form(True), 
     if dry_run:
         db.rollback()
     else:
+        for p in by_email.values():
+            sync_person_to_roster(db, p)
         db.commit()
     return {"dry_run": dry_run, "stats": stats, "errors": errors[:200], "error_count": len(errors),
             "counts": {"belts": len(parsed["belts"]), "members": len(parsed["members"]),
                        "alumni": len(parsed["alumni"]), "posts": len(parsed["posts"])}}
+
+
+# ---------------------------------------------------------------- import CSV
+CSV_ROSTER_COLS = {
+    "member_no": {"member_no", "no_ahli", "no ahli", "noahli", "nombor ahli", "no. ahli", "id"},
+    "name": {"name", "nama"},
+    "gender": {"gender", "jantina"},
+    "college": {"college", "kolej", "college_code"},
+    "email": {"email", "emel"},
+    "phone": {"phone", "telefon", "no_telefon", "no telefon", "tel"},
+    "intake": {"intake", "sesi", "sesi masuk", "sesi_masuk"},
+    "kind": {"kind", "jenis"},
+}
+
+
+@router.post("/import-csv", dependencies=[Depends(require_admin)])
+async def import_csv(file: UploadFile = File(...), db: Session = Depends(get_db)):
+    """Import CSV ringkas (no ahli, nama, jantina, kolej, emel, telefon).
+    Automatik kemas kini modul Persatuan (Person) DAN kelayakan pengangkutan (MemberRoster)."""
+    import re
+    raw = await file.read(4 * 1024 * 1024 + 1)
+    if len(raw) > 4 * 1024 * 1024:
+        raise HTTPException(413, "Fail terlalu besar (maks 4MB)")
+    try:
+        text = raw.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        text = raw.decode("latin-1")
+    try:
+        dialect = csv.Sniffer().sniff(text[:2000], delimiters=",;\t")
+    except csv.Error:
+        dialect = csv.excel
+    reader = csv.reader(io.StringIO(text), dialect)
+    rows = [r for r in reader if any(c.strip() for c in r)]
+    if not rows:
+        raise HTTPException(400, "Fail kosong")
+    header = [h.strip().lower() for h in rows[0]]
+    idx = {k: next((i for i, h in enumerate(header) if h in names), None) for k, names in CSV_ROSTER_COLS.items()}
+    if idx["member_no"] is None and idx["name"] is None:
+        raise HTTPException(400, "Kolum 'no ahli' atau 'nama' tidak dijumpai dalam baris tajuk fail CSV")
+
+    sg = _sg_numbers(db)
+    added = updated = 0
+    errors = []
+
+    for n, r in enumerate(rows[1:], start=2):
+        get = lambda k: (r[idx[k]].strip() if idx[k] is not None and idx[k] < len(r) else "")
+        mno = re.sub(r"\s+", "", get("member_no")).upper()
+        name = get("name")
+        email = get("email").lower()
+        phone = pp.clean_phone(get("phone"))
+        college = get("college").upper()
+        gender_raw = get("gender").lower()
+        gender = None
+        if gender_raw in ("l", "lelaki", "male", "m"):
+            gender = "male"
+        elif gender_raw in ("p", "perempuan", "female", "f"):
+            gender = "female"
+
+        intake = get("intake")
+        if not intake and mno.startswith("SG") and len(mno) >= 6:
+            intake = mno[2:6]
+        elif not intake and mno.startswith("SSG") and len(mno) >= 7:
+            intake = mno[3:7]
+        if not intake:
+            intake = "2627"
+
+        kind = get("kind").upper()
+        if kind not in ("SG", "SSG"):
+            kind = "SSG" if mno.startswith("SSG") else "SG"
+
+        if not mno and not name:
+            continue
+
+        p = None
+        if mno:
+            p = db.query(Person).filter_by(member_no=mno).first()
+        if p is None and email and "@" in email:
+            p = db.query(Person).filter(func.lower(Person.email) == email).first()
+
+        created = p is None
+        if created:
+            if not email or "@" not in email:
+                base_em = f"{mno.lower() if mno else 'ahli'}@pssgutm.local"
+                email = base_em
+                suffix = 1
+                while db.query(Person).filter(func.lower(Person.email) == email).first():
+                    email = f"{base_em.split('@')[0]}_{suffix}@pssgutm.local"
+                    suffix += 1
+            p = Person(email=email)
+            db.add(p)
+
+        p.name = name or p.name or mno
+        if email and "@" in email and not email.endswith("@pssgutm.local"):
+            p.email = email
+        if phone:
+            p.phone = phone
+        if gender:
+            p.gender = gender
+        if college:
+            p.college = college
+        p.intake = intake
+        p.kind = kind
+        p.active = True
+        if mno:
+            p.member_no = mno
+        elif not p.member_no:
+            p.member_no = pp.next_sg_no(intake, sg)
+            sg.add(p.member_no)
+
+        db.flush()
+        sync_person_to_roster(db, p)
+        added += created
+        updated += (not created)
+
+    db.commit()
+    return {"added": added, "updated": updated, "errors": errors[:30], "error_count": len(errors)}
 
 
 # ---------------------------------------------------------------- biro, seki, jawatan

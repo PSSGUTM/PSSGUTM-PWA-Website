@@ -138,37 +138,94 @@ function Tamat() {
   );
 }
 
-/* ---------- Import Excel ---------- */
+/* ---------- Import Excel & CSV ---------- */
 function Import({ onDone }) {
   const ref = useRef();
+  const csvRef = useRef();
   const [file, setFile] = useState(null);
+  const [csvFile, setCsvFile] = useState(null);
   const [res, setRes] = useState(null);
+  const [csvRes, setCsvRes] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [csvBusy, setCsvBusy] = useState(false);
+
   const run = (dry) => {
     setBusy(true);
     api.upload("/persatuan/import", file, { dry_run: dry ? "true" : "false" }).then((r) => { setRes(r); if (!dry) { setFile(null); onDone?.(); } }).catch(fail).finally(() => setBusy(false));
   };
+
+  const runCsv = () => {
+    if (!csvFile) return;
+    setCsvBusy(true);
+    api.upload("/persatuan/import-csv", csvFile).then((r) => {
+      setCsvRes(r);
+      setCsvFile(null);
+      if (csvRef.current) csvRef.current.value = "";
+      onDone?.();
+    }).catch(fail).finally(() => setCsvBusy(false));
+  };
+
+  const downloadSampleCsv = (e) => {
+    e.preventDefault();
+    const content = "no ahli,nama,jantina,kolej,emel,telefon,sesi\nSG2627001,Muhammad Ali bin Abu,lelaki,KTDI,ali@graduate.utm.my,0123456789,2627\nSG2627002,Siti Nurhaliza binti Ahmad,perempuan,KTF,siti@graduate.utm.my,0198765432,2627";
+    const blob = new Blob([content], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "contoh_ahli_pssgutm.csv";
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   return (
-    <div className="card">
-      <h3>Import ahli, alumni, bengkung dan jawatan</h3>
-      <p className="small muted">Guna fail format rasmi. Import boleh diulang: rekod dipadankan melalui emel dan dikemas kini, bukan digandakan.</p>
-      <p><a href="/format-import-PSSGUTM.xlsx" download>⬇️ Muat turun format import (.xlsx)</a></p>
-      <input ref={ref} type="file" accept=".xlsx" onChange={(e) => { setFile(e.target.files[0]); setRes(null); }} />
-      <div className="actions">
-        <button className="btn ghost" disabled={!file || busy} onClick={() => run(true)}>1. Semak dahulu</button>
-        <button className="btn" disabled={!file || busy || !res || !res.dry_run} onClick={() => run(false)}>2. Import</button>
-      </div>
-      {res && (
-        <div className="note" style={{ cursor: "default" }}>
-          <b>{res.dry_run ? "Semakan (belum disimpan)" : "Selesai diimport"}</b>
-          <p className="small">Baharu {res.stats.people_new} · dikemas kini {res.stats.people_updated} · bengkung baharu {res.stats.belts_new + res.stats.belts_created_from_people} · jawatan baharu {res.stats.posts_new}</p>
-          {res.error_count > 0 && <>
-            <p className="error small">{res.error_count} baris bermasalah (baris ini dilangkau):</p>
-            {res.errors.map((e, i) => <p className="small" key={i}>{e.sheet} baris {e.row}: {e.msg}</p>)}
-          </>}
+    <>
+      <div className="card">
+        <h3>📁 Import Senarai Ahli (Format CSV Ringkas — Disyorkan)</h3>
+        <p className="small muted">
+          Muat naik sekali di sini untuk kemas kini modul <b>Persatuan (Kehadiran & Direktori)</b> dan <b>Pengangkutan (Kelayakan Prebet/Ahli)</b> secara serentak.
+        </p>
+        <p><a href="#sample" onClick={downloadSampleCsv}>⬇️ Muat turun contoh templat CSV (.csv)</a></p>
+        <input ref={csvRef} type="file" accept=".csv,text/csv,text/plain" onChange={(e) => { setCsvFile(e.target.files[0]); setCsvRes(null); }} />
+        <div className="actions">
+          <button className="btn" disabled={!csvFile || csvBusy} onClick={runCsv}>
+            {csvBusy ? "Memproses…" : "Muat Naik & Selaraskan Ahli"}
+          </button>
         </div>
-      )}
-    </div>
+        {csvRes && (
+          <div className="note" style={{ cursor: "default" }}>
+            <b>✓ Selesai Diselaraskan</b>
+            <p className="small">Ditambah {csvRes.added} ahli baharu · Dikemas kini {csvRes.updated} ahli sedia ada</p>
+            {csvRes.error_count > 0 && (
+              <>
+                <p className="error small">{csvRes.error_count} baris ada ralat:</p>
+                {csvRes.errors.map((e, i) => <p className="small error" key={i}>{e}</p>)}
+              </>
+            )}
+          </div>
+        )}
+      </div>
+
+      <div className="card">
+        <h3>📊 Import Penuh Format Excel (.xlsx)</h3>
+        <p className="small muted">Guna fail format rasmi jika ada maklumat terperinci bengkung dan jawatan biro. Rekod dipadankan melalui emel.</p>
+        <p><a href="/format-import-PSSGUTM.xlsx" download>⬇️ Muat turun format import (.xlsx)</a></p>
+        <input ref={ref} type="file" accept=".xlsx" onChange={(e) => { setFile(e.target.files[0]); setRes(null); }} />
+        <div className="actions">
+          <button className="btn ghost" disabled={!file || busy} onClick={() => run(true)}>1. Semak dahulu</button>
+          <button className="btn" disabled={!file || busy || !res || !res.dry_run} onClick={() => run(false)}>2. Import</button>
+        </div>
+        {res && (
+          <div className="note" style={{ cursor: "default" }}>
+            <b>{res.dry_run ? "Semakan (belum disimpan)" : "Selesai diimport"}</b>
+            <p className="small">Baharu {res.stats.people_new} · dikemas kini {res.stats.people_updated} · bengkung baharu {res.stats.belts_new + res.stats.belts_created_from_people} · jawatan baharu {res.stats.posts_new}</p>
+            {res.error_count > 0 && <>
+              <p className="error small">{res.error_count} baris bermasalah (baris ini dilangkau):</p>
+              {res.errors.map((e, i) => <p className="small" key={i}>{e.sheet} baris {e.row}: {e.msg}</p>)}
+            </>}
+          </div>
+        )}
+      </div>
+    </>
   );
 }
 

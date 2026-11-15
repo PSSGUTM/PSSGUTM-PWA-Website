@@ -9,8 +9,17 @@ export default function Pengangkutan({ user }) {
   const next = (days || []).find((d) => !d.past);
   const st = !next ? null : next.event_status === "finalised" ? "Senarai disahkan" : "Senarai belum disahkan";
   const mine = next ? next.trips.filter((t) => t.status === "confirmed").length : 0;
+  const incomplete = user && (!user.phone || user.phone === "0000000000" || !user.college_id || !user.block);
+
   return (
     <div>
+      {incomplete && (
+        <div className="note" style={{ background: "rgba(212, 169, 78, 0.15)", border: "1px solid var(--accent)", borderRadius: 12, padding: ".8rem 1rem", marginBottom: "1rem" }}>
+          <b style={{ color: "var(--accent)" }}>⚠️ Profil Belum Lengkap</b>
+          <p className="small muted" style={{ margin: ".3rem 0 .5rem" }}>Sila lengkapkan nombor telefon, kolej kediaman dan nombor bilik anda sebelum menempah atau menjadi prebet.</p>
+          <Link to="/profil" className="btn small" style={{ display: "inline-block" }}>Lengkapkan Profil</Link>
+        </div>
+      )}
       <div className="card">
         <small className="muted">Latihan seterusnya</small>
         {days === null ? <p className="muted">Memuatkan…</p> : next ? (
