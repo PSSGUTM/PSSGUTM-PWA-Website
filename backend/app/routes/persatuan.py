@@ -25,7 +25,7 @@ DEFAULT_BIROS = (("BKK", False, False), ("BIT", False, False), ("BLG", True, Fal
 
 def migrate_legacy_members(db: Session) -> None:
     """Salin semua rekod ahli dan prebet sedia ada (MemberRoster & User) ke jadual Person."""
-    from .models import College, MemberRoster, User
+    from ..models import College, MemberRoster, User
 
     colleges = db.query(College).all()
     code_by_id = {c.id: c.code for c in colleges}
