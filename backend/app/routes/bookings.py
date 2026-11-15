@@ -164,8 +164,24 @@ BRAND_DEFAULTS = {"brand_name": "PSSGUTM", "brand_primary": "#a8322a", "brand_ac
 
 
 def read_branding(db: Session) -> dict:
+    bname = db.get(models.Setting, "brand_name")
+    if bname is not None and "transport" in (bname.value or "").lower():
+        bname.value = "PSSGUTM"
+        try:
+            db.commit()
+        except Exception:
+            db.rollback()
+    elif bname is None:
+        db.merge(models.Setting(key="brand_name", value="PSSGUTM"))
+        try:
+            db.commit()
+        except Exception:
+            db.rollback()
+
     vals = {s.key: s.value for s in db.query(models.Setting)}
     out = {k: (vals.get(k) or dflt) for k, dflt in BRAND_DEFAULTS.items()}
+    if "transport" in (out.get("brand_name") or "").lower():
+        out["brand_name"] = "PSSGUTM"
     out["has_logo"] = bool(vals.get("brand_logo_file"))
     return out
 

@@ -80,7 +80,7 @@ export default function FrontShell({ user, brand, onLogout, children, home = fal
         )}
         {home ? (
           <span className="fr-brand">
-            <b>{brand?.brand_name || "PSSGUTM"}</b>
+            <b>{(brand?.brand_name || "PSSGUTM").replace(/\s*transport/i, "").trim() || "PSSGUTM"}</b>
             {brand?.tagline && <small>{brand.tagline}</small>}
           </span>
         ) : <b className="fr-title">{title}</b>}

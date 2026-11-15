@@ -40,7 +40,7 @@ export function applyBranding(b) {
   r.setProperty("--accent", b.brand_accent);
   r.setProperty("--on-primary", readable(b.brand_primary));
   r.setProperty("--on-accent", readable(b.brand_accent));
-  document.title = b.brand_name;
+  document.title = (b.brand_name || "PSSGUTM").replace(/\s*transport/i, "").trim() || "PSSGUTM";
   document.querySelector('meta[name="theme-color"]')?.setAttribute("content", b.brand_primary);
 }
 
@@ -78,7 +78,7 @@ function Shell({ user, onLogout, onProfile, brand, children }) {
       <header className="top">
         <button className="fr-ico" aria-label="Kembali" onClick={() => (canBack ? navigate(-1) : navigate("/"))}><IconBack /></button>
         <span className="brand">
-          <img src={brand?.has_logo ? brand.logo_url : "/icon-192.png"} alt="" onError={(e) => { e.currentTarget.onerror = null; e.currentTarget.src = "/icon-192.png"; }} /> {brand?.brand_name || "PSSGUTM"}
+          <img src={brand?.has_logo ? brand.logo_url : "/icon-192.png"} alt="" onError={(e) => { e.currentTarget.onerror = null; e.currentTarget.src = "/icon-192.png"; }} /> {(brand?.brand_name || "PSSGUTM").replace(/\s*transport/i, "").trim() || "PSSGUTM"}
         </span>
         <span className="top-actions">
           <Link to="/notis" className="bell" aria-label="Notifikasi">🔔{unread > 0 && <span className="badge-dot">{unread > 9 ? "9+" : unread}</span>}</Link>

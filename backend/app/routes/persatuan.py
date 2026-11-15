@@ -23,12 +23,122 @@ router = APIRouter(prefix="/persatuan", tags=["persatuan"])
 DEFAULT_BIROS = (("BKK", False, False), ("BIT", False, False), ("BLG", True, False))
 
 
-def ensure_seed(db: Session) -> None:
-    """Biro asas (admin boleh ubah nama dan kebenaran). Dijalankan setiap deploy, tidak menimpa suntingan."""
-    if db.query(Biro).count() == 0:
-        for name, att, inv in DEFAULT_BIROS:
-            db.add(Biro(name=name, can_attendance=att, can_inventory=inv))
+def migrate_legacy_members(db: Session) -> None:
+    """Salin semua rekod ahli dan prebet sedia ada (MemberRoster & User) ke jadual Person."""
+    from .models import College, MemberRoster, User
+
+    colleges = db.query(College).all()
+    code_by_id = {c.id: c.code for c in colleges}
+
+    existing_emails = {p[0].lower() for p in db.query(Person.email).all() if p[0]}
+    existing_mno = {p[0].upper() for p in db.query(Person.member_no).all() if p[0]}
+
+    # A. Daripada akaun User sedia ada
+    for u in db.query(User).all():
+        mno = (u.member_no or "").strip().upper()
+        if not mno or mno == "ADMIN":
+            continue
+        email = (u.email or "").strip().lower()
+        if not email:
+            continue
+
+        if email in existing_emails or mno in existing_mno:
+            p = db.query(Person).filter(func.lower(Person.email) == email).first()
+            if not p and mno:
+                p = db.query(Person).filter_by(member_no=mno).first()
+            if p:
+                col_code = code_by_id.get(u.college_id, "")
+                if not p.phone and u.phone:
+                    p.phone = u.phone
+                if not p.block and u.block:
+                    p.block = u.block
+                if not p.college and col_code:
+                    p.college = col_code
+                if not p.member_no and mno:
+                    p.member_no = mno
+        else:
+            intake = mno[2:6] if (mno.startswith("SG") and len(mno) >= 6) else ""
+            kind = "SSG" if mno.startswith("SSG") else "SG"
+            col_code = code_by_id.get(u.college_id, "")
+            p_new = Person(
+                name=u.name,
+                email=email,
+                phone=u.phone or "",
+                gender=u.gender.value if u.gender else None,
+                intake=intake,
+                kind=kind,
+                member_no=mno,
+                college=col_code,
+                block=u.block or "",
+                active=u.active,
+            )
+            db.add(p_new)
+            existing_emails.add(email)
+            existing_mno.add(mno)
+    try:
         db.commit()
+    except Exception:
+        db.rollback()
+
+    # B. Daripada MemberRoster sedia ada (ahli yang belum daftar akaun)
+    for r in db.query(MemberRoster).all():
+        mno = (r.member_no or "").strip().upper()
+        if not mno or mno in existing_mno:
+            continue
+
+        candidate_email = f"{mno.lower()}@pssgutm.local"
+        if candidate_email in existing_emails:
+            candidate_email = f"{mno.lower()}_{r.id}@pssgutm.local"
+
+        intake = mno[2:6] if (mno.startswith("SG") and len(mno) >= 6) else ""
+        kind = "SSG" if mno.startswith("SSG") else "SG"
+        col_code = code_by_id.get(r.college_id, "")
+        p_new = Person(
+            name=r.name or mno,
+            email=candidate_email,
+            gender=r.gender.value if r.gender else None,
+            intake=intake,
+            kind=kind,
+            member_no=mno,
+            college=col_code,
+            active=r.active,
+        )
+        db.add(p_new)
+        existing_emails.add(candidate_email)
+        existing_mno.add(mno)
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+
+
+def ensure_seed(db: Session) -> None:
+    """Biro asas dan penyelarasan awal. Dijalankan setiap deploy, selamat diulang."""
+    try:
+        if db.query(Biro).count() == 0:
+            for name, att, inv in DEFAULT_BIROS:
+                db.add(Biro(name=name, can_attendance=att, can_inventory=inv))
+            db.commit()
+    except Exception:
+        db.rollback()
+
+    # 1. Pastikan brand_name ialah PSSGUTM
+    try:
+        bname = db.get(models.Setting, "brand_name")
+        if bname is not None and "transport" in (bname.value or "").lower():
+            bname.value = "PSSGUTM"
+            db.commit()
+        elif bname is None:
+            db.merge(models.Setting(key="brand_name", value="PSSGUTM"))
+            db.commit()
+    except Exception:
+        db.rollback()
+
+    # 2. Migrasi ahli daripada MemberRoster & User ke Person
+    try:
+        migrate_legacy_members(db)
+    except Exception:
+        db.rollback()
 
 
 # ---------------------------------------------------------------- bantuan
@@ -253,6 +363,9 @@ def sync_person_to_roster(db: Session, p: Person):
 @router.get("/people", dependencies=[Depends(require_admin)])
 def list_people(q: str = "", kind: str = "", due: bool = False, limit: int = 300, offset: int = 0,
                 db: Session = Depends(get_db)):
+    if db.query(Person).count() == 0:
+        migrate_legacy_members(db)
+
     qs = db.query(Person)
     if q.strip():
         like = f"%{q.strip().lower()}%"

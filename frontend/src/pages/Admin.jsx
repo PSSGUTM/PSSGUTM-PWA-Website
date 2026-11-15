@@ -888,6 +888,39 @@ function Roster() {
     try { setRes(await api.upload("/admin/roster/import", file)); load(); } catch (e2) { fail(e2); }
     e.target.value = "";
   };
+  const downloadCsv = async () => {
+    try {
+      const a = JSON.parse(localStorage.getItem("pssgutm_auth") || "{}");
+      const res2 = await fetch(`${import.meta.env.VITE_API_URL || "http://localhost:8000"}/admin/roster/export-csv`, {
+        headers: { Authorization: `Bearer ${a.token}` }
+      });
+      if (res2.ok) {
+        const blob = await res2.blob();
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = `senarai_ahli_transport_${new Date().toISOString().slice(0, 10)}.csv`;
+        link.click();
+        URL.revokeObjectURL(url);
+        return;
+      }
+    } catch (_) {}
+    if (!rows || rows.length === 0) return alert("Tiada data ahli untuk dimuat turun.");
+    const header = "no ahli,nama,jantina,kolej,emel,telefon,sesi\n";
+    const body = rows.map((r) => {
+      const g = r.gender === "male" ? "L" : r.gender === "female" ? "P" : "";
+      const intake = r.member_no.startsWith("SG") && r.member_no.length >= 6 ? `20${r.member_no.slice(2, 4)}/20${r.member_no.slice(4, 6)}` : "";
+      const cleanName = (r.name || "").includes(",") ? `"${r.name}"` : (r.name || "");
+      return `${r.member_no},${cleanName},${g},${r.college || ""},,,${intake}`;
+    }).join("\n");
+    const blob = new Blob([header + body], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `senarai_ahli_transport_${new Date().toISOString().slice(0, 10)}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
   const add = async (e) => {
     e.preventDefault();
     try { await api.post("/admin/roster", { member_no: f.member_no, name: f.name, gender: f.gender || null, college_code: f.college_code || null }); setF({ member_no: "", name: "", gender: "", college_code: "" }); load(); }
@@ -900,6 +933,11 @@ function Roster() {
       <h3>📋 Senarai ahli sah</h3>
       <p className="muted small">Hanya no. ahli dalam senarai ini boleh mendaftar. Import CSV dengan kolum: no ahli, nama, jantina (L/P), kolej (kod, cth KTF). Hanya no. ahli wajib. Format no. ahli: SG + 7 digit (cth SG2627001). No. ahli berulang dalam fail ditolak (semua barisnya); lajur tambahan (IC, alamat dll) diabaikan. Boleh import semula untuk kemas kini; no. lama yang tiada dalam fail kekal.</p>
       <input type="file" accept=".csv,text/csv,text/plain" onChange={csv} />
+      <div style={{ margin: ".6rem 0 1rem" }}>
+        <button type="button" className="btn ghost small" onClick={downloadCsv}>
+          📥 Muat turun senarai ahli sedia ada (.CSV)
+        </button>
+      </div>
       {res && <p className="small okmsg">Ditambah {res.added}, dikemas kini {res.updated}{res.error_count ? `, ${res.error_count} ralat` : ""}{res.errors.map((x) => <span key={x} className="error" style={{ display: "block" }}>{x}</span>)}</p>}
       <form onSubmit={add}>
         <input placeholder="No. ahli" value={f.member_no} onChange={(e) => setF({ ...f, member_no: e.target.value })} required />

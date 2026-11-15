@@ -126,73 +126,16 @@ def upgrade_v10(db):
 
 def upgrade_v11(db, by_code):
     """Peralihan penjenamaan ke 'PSSGUTM' dan migrasi data ahli transport lama (MemberRoster & User) ke modul Persatuan (Person)."""
-    from sqlalchemy import func
-    from .models import Setting, MemberRoster, User
-    from .models_main import Person
+    from .models import Setting
+    from .routes.persatuan import migrate_legacy_members
 
-    if db.get(Setting, "seed_v11") is not None:
-        return
-
-    # 1. Pastikan nama aplikasi ialah PSSGUTM
     bname = db.get(Setting, "brand_name")
     if bname is not None and "transport" in (bname.value or "").lower():
         bname.value = "PSSGUTM"
     elif bname is None:
         db.merge(Setting(key="brand_name", value="PSSGUTM"))
 
-    code_by_id = {c.id: c.code for c in by_code.values()}
-
-    # 2. Pindahkan akaun User sedia ada ke jadual Person jika belum ada
-    for u in db.query(User).all():
-        if not u.member_no or u.member_no.upper() == "ADMIN":
-            continue
-        p = db.query(Person).filter(func.lower(Person.email) == u.email.lower()).first()
-        if p is None:
-            p = db.query(Person).filter_by(member_no=u.member_no.strip().upper()).first()
-        mno = u.member_no.strip().upper()
-        intake = mno[2:6] if (mno.startswith("SG") and len(mno) >= 6) else ""
-        kind = "SSG" if mno.startswith("SSG") else "SG"
-        col_code = code_by_id.get(u.college_id, "")
-        if p is None:
-            db.add(Person(
-                name=u.name,
-                email=u.email.lower(),
-                phone=u.phone or "",
-                gender=u.gender.value if u.gender else None,
-                intake=intake,
-                kind=kind,
-                member_no=mno,
-                college=col_code,
-                block=u.block or "",
-                active=u.active
-            ))
-        else:
-            if not p.phone and u.phone:
-                p.phone = u.phone
-            if not p.block and u.block:
-                p.block = u.block
-            if not p.college and col_code:
-                p.college = col_code
-
-    # 3. Pindahkan ahli dalam MemberRoster yang belum ada rekod Person
-    for r in db.query(MemberRoster).all():
-        mno = r.member_no.strip().upper()
-        p = db.query(Person).filter_by(member_no=mno).first()
-        if p is None:
-            intake = mno[2:6] if (mno.startswith("SG") and len(mno) >= 6) else ""
-            kind = "SSG" if mno.startswith("SSG") else "SG"
-            col_code = code_by_id.get(r.college_id, "")
-            db.add(Person(
-                name=r.name or mno,
-                email=f"{mno.lower()}@pssgutm.local",
-                gender=r.gender.value if r.gender else None,
-                intake=intake,
-                kind=kind,
-                member_no=mno,
-                college=col_code,
-                active=r.active
-            ))
-
+    migrate_legacy_members(db)
     db.merge(Setting(key="seed_v11", value="1"))
 
 

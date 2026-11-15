@@ -56,7 +56,7 @@ export default function Landing({ brand }) {
     <div className="lp">
       <section className={`lp-hero p-${pat}`} style={heroStyle}>
         <div className="lp-top">
-          <span className="brand"><img src={brand?.has_logo ? brand.logo_url : "/icon-192.png"} alt="" onError={(e) => { e.currentTarget.onerror = null; e.currentTarget.src = "/icon-192.png"; }} /> {brand?.brand_name || "PSSGUTM"}</span>
+          <span className="brand"><img src={brand?.has_logo ? brand.logo_url : "/icon-192.png"} alt="" onError={(e) => { e.currentTarget.onerror = null; e.currentTarget.src = "/icon-192.png"; }} /> {(brand?.brand_name || "PSSGUTM").replace(/\s*transport/i, "").trim() || "PSSGUTM"}</span>
           <Link className="btn ghost-light" to="/login">Login</Link>
         </div>
         <BrandMark brand={brand} size={104} />

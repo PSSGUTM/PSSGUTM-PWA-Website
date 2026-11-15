@@ -890,6 +890,50 @@ def roster(db: Session = Depends(get_db)):
     return [_roster_out(db, r, registered) for r in db.query(models.MemberRoster).order_by(models.MemberRoster.member_no)]
 
 
+@router.get("/roster/export-csv")
+def export_roster_csv(db: Session = Depends(get_db)):
+    """Eksport senarai ahli sedia ada dalam transport sebagai CSV mengikut format import persatuan."""
+    import csv
+    import io
+    from fastapi.responses import Response
+
+    users_by_mno = {u.member_no.upper(): u for u in db.query(models.User).all() if u.member_no}
+    col_by_id = {c.id: c.code for c in db.query(models.College).all()}
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["no ahli", "nama", "jantina", "kolej", "emel", "telefon", "sesi"])
+
+    for r in db.query(models.MemberRoster).order_by(models.MemberRoster.member_no).all():
+        mno = (r.member_no or "").strip().upper()
+        if not mno:
+            continue
+        u = users_by_mno.get(mno)
+        name = r.name or (u.name if u else "")
+        gender = ""
+        g_val = r.gender.value if r.gender else (u.gender.value if (u and u.gender) else None)
+        if g_val == "male":
+            gender = "L"
+        elif g_val == "female":
+            gender = "P"
+
+        college = col_by_id.get(r.college_id, "") or (col_by_id.get(u.college_id, "") if u else "")
+        email = u.email if u else ""
+        phone = u.phone if (u and u.phone and u.phone != "0000000000") else ""
+        sesi = ""
+        if mno.startswith("SG") and len(mno) >= 6:
+            sesi = f"20{mno[2:4]}/20{mno[4:6]}"
+
+        writer.writerow([mno, name, gender, college, email, phone, sesi])
+
+    content = output.getvalue()
+    return Response(
+        content=content,
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename=senarai_ahli_pssgutm_{svc.today_my().isoformat()}.csv"}
+    )
+
+
 def _upsert_roster(db, colleges, member_no, name, gender, college_code, active: bool | None = True):
     member_no = re.sub(r"\s+", "", (member_no or "")).upper()
     if not member_no:
