@@ -220,81 +220,221 @@ def broadcast_member_no_verification_notice(db: Session) -> None:
         db.rollback()
 
 
-def heal_all_swapped_members(db: Session) -> None:
-    """1. Selaraskan sesi tidak sah 2626 -> 2627
-    2. Selaraskan data Amirul Aiman (SG2425025) & Aliuddin (SG2425024)
-    3. Selaraskan nama semua User berdaftar ke rekod Person yang sepadan"""
+def sync_canonical_roster_and_dedup(db: Session) -> None:
+    """Penyelarasan tepat senarai ahli Person & MemberRoster berasaskan fail rasmi roster_official.csv (203 ahli).
+    - Menghapuskan sebarang sesi 2626 (tidak wujud).
+    - Memulihkan nama-nama yang hilang / terpadam (cth: SG2425024 Muhammad Aliuddin Bin Mohd Anuar).
+    - Membetulkan kes tertukar Amirul Aiman (SG2425025) vs Aliuddin (SG2425024).
+    - Menghapuskan semua rekod duplikasi Person & MemberRoster (cth 2x Haaziq Syahmi, 2x Amirul Aiman).
+    - Memindahkan relasi ForeignKey (Post, AttendRecord, BeltHistory, Loan) ke rekod master sebelum menghapus duplikasi.
+    - Menyelaraskan User berdaftar ke rekod Person kanonikal."""
+    import os, csv
     from sqlalchemy import or_
+
     try:
-        # A. Betulkan sesi 2626 kepada 2627
-        for p in db.query(Person).filter(Person.intake == "2626").all():
+        csv_candidates = [
+            os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "roster_official.csv"),
+            os.path.join(os.getcwd(), "backend", "app", "data", "roster_official.csv"),
+            os.path.join(os.getcwd(), "app", "data", "roster_official.csv"),
+        ]
+        csv_path = next((p for p in csv_candidates if os.path.exists(p)), None)
+        if not csv_path:
+            return
+
+        with open(csv_path, "r", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            official_rows = list(reader)
+
+        canonical_map: dict[str, dict[str, str]] = {}
+        for r in official_rows:
+            mno = (r.get("no ahli") or r.get("member_no") or "").strip().upper()
+            name = (r.get("nama") or r.get("name") or "").strip().upper()
+            gender = (r.get("jantina") or r.get("gender") or "L").strip().upper()
+            if not mno:
+                continue
+            intake = mno[2:6] if (mno.startswith("SG") and len(mno) >= 6) else ""
+            canonical_map[mno] = {
+                "name": name,
+                "gender": "P" if gender == "P" else "L",
+                "intake": intake,
+            }
+        canonical_mnos = set(canonical_map.keys())
+
+        # A. Disambiguate placeholder emails so there are no unique constraint clashes during sync
+        for p in db.query(Person).all():
+            if p.email and p.email.endswith("@pssgutm.local"):
+                p.email = f"{p.member_no.lower()}_{p.id}@pssgutm.local" if p.member_no else f"person_{p.id}@pssgutm.local"
+        db.flush()
+
+        # B. Selaraskan sesi 2626 -> 2627 untuk sebarang rekod Person atau Post yang lama
+        for p in db.query(Person).filter((Person.intake == "2626") | (Person.member_no.like("SG2626%"))).all():
             p.intake = "2627"
             if p.member_no and p.member_no.startswith("SG2626"):
-                seq = p.member_no[6:] if len(p.member_no) >= 7 else "008"
-                new_mno = f"SG2627{seq}"
-                old_mno = p.member_no
-                p.member_no = new_mno
-                sync_person_to_roster(db, p, old_mno=old_mno)
+                seq = p.member_no[6:] if len(p.member_no) >= 7 else "006"
+                p.member_no = f"SG2627{seq}"
 
         for post in db.query(Post).filter(Post.session == "2626").all():
             post.session = "2627"
 
-        # B. Betulkan kes tertukar Amirul Aiman vs Aliuddin
+        # C. Selaraskan User Amirul Aiman
         amirul_user = db.query(models.User).filter(func.lower(models.User.email) == "amirul-05@graduate.utm.my").first()
         if amirul_user:
             amirul_user.member_no = "SG2425025"
+            amirul_user.gender = models.Gender.male
+            amirul_user.phone = amirul_user.phone or "0192278390"
 
-        p25 = db.query(Person).filter_by(member_no="SG2425025").first()
+        # D. Selaraskan setiap ahli kanonikal (203 ahli)
+        for mno, info in canonical_map.items():
+            # Padankan terutamanya mengikut member_no
+            candidates = db.query(Person).filter_by(member_no=mno).all()
+            if not candidates:
+                # Jika tiada yang memegang member_no ini, cari mengikut nama yang belum terikat dengan no kanonikal lain
+                by_name = db.query(Person).filter(
+                    func.upper(Person.name) == info["name"],
+                    (Person.member_no.is_(None)) | (~Person.member_no.in_(canonical_mnos))
+                ).all()
+                if by_name:
+                    candidates = by_name
+
+            if candidates:
+                # Pilih rekod master tunggal
+                if mno == "SG2425025":
+                    master = next((c for c in candidates if (c.email or "").lower() == "amirul-05@graduate.utm.my"), candidates[0])
+                else:
+                    master = next((c for c in candidates if c.email and not c.email.endswith("@pssgutm.local")), candidates[0])
+
+                # Gabungkan dan pindahkan rekod duplikasi ke master
+                for dup in candidates:
+                    if dup.id == master.id:
+                        continue
+
+                    # 1. Pindahkan Post
+                    for p_post in db.query(Post).filter_by(person_id=dup.id).all():
+                        existing_post = db.query(Post).filter_by(
+                            person_id=master.id, session=p_post.session, title=p_post.title
+                        ).first()
+                        if existing_post:
+                            db.delete(p_post)
+                        else:
+                            p_post.person_id = master.id
+
+                    # 2. Pindahkan AttendRecord
+                    for p_att in db.query(AttendRecord).filter_by(person_id=dup.id).all():
+                        existing_att = db.query(AttendRecord).filter_by(
+                            person_id=master.id, attendance_id=p_att.attendance_id
+                        ).first()
+                        if existing_att:
+                            db.delete(p_att)
+                        else:
+                            p_att.person_id = master.id
+
+                    # 3. Pindahkan BeltHistory
+                    for p_belt in db.query(BeltHistory).filter_by(person_id=dup.id).all():
+                        existing_belt = db.query(BeltHistory).filter_by(
+                            person_id=master.id, belt_id=p_belt.belt_id
+                        ).first()
+                        if existing_belt:
+                            db.delete(p_belt)
+                        else:
+                            p_belt.person_id = master.id
+
+                    # 4. Pindahkan Loan
+                    for p_loan in db.query(Loan).filter_by(person_id=dup.id).all():
+                        p_loan.person_id = master.id
+
+                    # Padam rekod Person duplikasi
+                    db.delete(dup)
+
+                master.name = info["name"]
+                master.member_no = mno
+                master.gender = info["gender"]
+                master.intake = info["intake"]
+                master.kind = "SG"
+                master.active = True
+                if not master.email or master.email.endswith("@pssgutm.local"):
+                    master.email = f"{mno.lower()}@pssgutm.local"
+            else:
+                # Wujudkan rekod Person baharu jika tiada (memulihkan ahli hilang)
+                master = Person(
+                    name=info["name"],
+                    member_no=mno,
+                    gender=info["gender"],
+                    intake=info["intake"],
+                    kind="SG",
+                    email=f"{mno.lower()}@pssgutm.local",
+                    active=True,
+                )
+                db.add(master)
+
+            if mno == "SG2425025":
+                master.email = "amirul-05@graduate.utm.my"
+                master.phone = "0192278390"
+                master.college = "KTC"
+
+            if mno == "SG2425024":
+                master.name = "MUHAMMAD ALIUDDIN BIN MOHD ANUAR"
+                if master.email == "amirul-05@graduate.utm.my":
+                    master.email = "aliuddin@pssgutm.local"
+
+        # D. Pastikan Aliuddin (SG2425024) dan Amirul Aiman (SG2425025) tidak bersilang
         p24 = db.query(Person).filter_by(member_no="SG2425024").first()
-        p_amirul = db.query(Person).filter(func.lower(Person.email) == "amirul-05@graduate.utm.my").first()
+        p25 = db.query(Person).filter_by(member_no="SG2425025").first()
+        if p24 and p25 and p24.id != p25.id:
+            for post in db.query(Post).filter_by(person_id=p24.id).all():
+                if "kebajikan" in (post.title or "").lower() or post.biro_id == 5:
+                    existing = db.query(Post).filter_by(person_id=p25.id, session=post.session, title=post.title).first()
+                    if existing:
+                        db.delete(post)
+                    else:
+                        post.person_id = p25.id
+            for att_rec in db.query(AttendRecord).filter_by(person_id=p24.id).all():
+                existing_att = db.query(AttendRecord).filter_by(attendance_id=att_rec.attendance_id, person_id=p25.id).first()
+                if existing_att:
+                    db.delete(att_rec)
+                else:
+                    att_rec.person_id = p25.id
 
-        target_amirul_p = p_amirul or p25 or p24
-        if target_amirul_p:
-            target_amirul_p.name = amirul_user.name if amirul_user else "MUHAMMAD AMIRUL AIMAN BIN ABDULLAH A24CS0124"
-            target_amirul_p.email = "amirul-05@graduate.utm.my"
-            target_amirul_p.member_no = "SG2425025"
-            target_amirul_p.phone = amirul_user.phone if amirul_user else "0192278390"
-            target_amirul_p.college = "KTC"
-            target_amirul_p.intake = "2425"
-
-            # Pastikan Aliuddin ada rekod Person berasingan dengan SG2425024
-            for other_p in (p24, p25):
-                if other_p and other_p.id != target_amirul_p.id:
-                    if "ALIUDDIN" in (other_p.name or "").upper():
-                        other_p.member_no = "SG2425024"
-                        other_p.name = "MUHAMMAD ALIUDDIN BIN MOHD ANUAR"
-                        if other_p.email == "amirul-05@graduate.utm.my":
-                            other_p.email = "aliuddin@pssgutm.local"
-
-                    # Pindahkan jawatan BKK jika tersangkut pada rekod lain
-                    for post in db.query(Post).filter(Post.person_id == other_p.id, Post.title.like("%Kebajikan dan Kerohanian%")).all():
-                        post.person_id = target_amirul_p.id
-                    # Pindahkan rekod kehadiran jika tersangkut pada rekod lain
-                    for att_rec in db.query(AttendRecord).filter_by(person_id=other_p.id).all():
-                        if not db.query(AttendRecord).filter_by(attendance_id=att_rec.attendance_id, person_id=target_amirul_p.id).first():
-                            att_rec.person_id = target_amirul_p.id
-
-            sync_person_to_roster(db, target_amirul_p, old_mno="SG2425024")
-
-        # C. Selaraskan nama & telefon semua User berdaftar dengan Person mereka
+        # E. Selaraskan User berdaftar ke Person kanonikal
         for u in db.query(models.User).filter(models.User.role != models.Role.admin).all():
             u_email = (u.email or "").strip().lower()
             if not u_email:
                 continue
             p = db.query(Person).filter(func.lower(Person.email) == u_email).first()
             if p:
-                if u.name and len(u.name.strip()) > 3 and not u.name.lower().startswith("admin"):
-                    p.name = u.name.strip()
-                if u.phone and not p.phone:
-                    p.phone = u.phone
                 if u.member_no and p.member_no and u.member_no != p.member_no:
                     u.member_no = p.member_no
+                if u.phone and not p.phone:
+                    p.phone = u.phone
             elif u.member_no:
                 p_mno = db.query(Person).filter_by(member_no=u.member_no).first()
-                if p_mno and p_mno.email.endswith("@pssgutm.local"):
+                if p_mno and (p_mno.email.endswith("@pssgutm.local") or not p_mno.email):
                     p_mno.email = u_email
-                    if u.name:
-                        p_mno.name = u.name.strip()
+
+        # F. Selaraskan jadual MemberRoster (203 rekod unik)
+        for mno, info in canonical_map.items():
+            rosters = db.query(models.MemberRoster).filter_by(member_no=mno).all()
+            g_enum = models.Gender.male if info["gender"] == "L" else models.Gender.female
+            if rosters:
+                master_r = rosters[0]
+                master_r.name = info["name"]
+                master_r.gender = g_enum
+                master_r.active = True
+                for dup_r in rosters[1:]:
+                    db.delete(dup_r)
+            else:
+                db.add(models.MemberRoster(
+                    member_no=mno,
+                    name=info["name"],
+                    gender=g_enum,
+                    active=True,
+                ))
+
+        for r in db.query(models.MemberRoster).filter(models.MemberRoster.member_no.like("SG%")).all():
+            if r.member_no not in canonical_mnos or r.member_no.startswith("SG2626"):
+                db.delete(r)
+
+        for p in db.query(Person).filter(Person.kind == "SG", Person.member_no.like("SG2626%")).all():
+            db.delete(p)
 
         db.commit()
     except Exception:
@@ -341,9 +481,9 @@ def ensure_seed(db: Session) -> None:
     except Exception:
         db.rollback()
 
-    # 5. Selaraskan data ahli tertukar & betulkan sesi tidak sah
+    # 5. Penyelarasan penuh ahli & direktori berasaskan fail rasmi 203 ahli
     try:
-        heal_all_swapped_members(db)
+        sync_canonical_roster_and_dedup(db)
     except Exception:
         db.rollback()
 
@@ -351,7 +491,15 @@ def ensure_seed(db: Session) -> None:
 # ---------------------------------------------------------------- bantuan
 
 def person_of(db: Session, user: models.User) -> Person | None:
-    return db.query(Person).filter(func.lower(Person.email) == (user.email or "").lower()).first()
+    if user.email:
+        p = db.query(Person).filter(func.lower(Person.email) == user.email.strip().lower()).first()
+        if p:
+            return p
+    if user.member_no:
+        p = db.query(Person).filter_by(member_no=user.member_no.strip().upper()).first()
+        if p:
+            return p
+    return None
 
 
 def can(db: Session, user: models.User, flag: str) -> bool:
