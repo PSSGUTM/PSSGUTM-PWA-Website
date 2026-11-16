@@ -21,7 +21,8 @@ def is_admin_email(email: str) -> bool:
     if not email:
         return False
     raw = os.getenv("ADMIN_EMAILS") or os.getenv("ADMIN_EMAIL") or ""
-    admins = {"pssgutm@gmail.com"} | {e.strip().strip("\"'").lower() for e in raw.split(",") if e.strip()}
+    # Kedua-dua emel persatuan DAN emel peribadi developer dibenarkan sebagai admin
+    admins = {"pssgutm@gmail.com", "muhammadamirulaiman0808@gmail.com"} | {e.strip().strip("\"'").lower() for e in raw.split(",") if e.strip()}
     return email.strip().strip("\"'").lower() in admins
 
 

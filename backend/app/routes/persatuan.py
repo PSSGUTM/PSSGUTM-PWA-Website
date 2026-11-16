@@ -495,41 +495,37 @@ def ensure_seed(db: Session) -> None:
 
 
 def ensure_admin_user(db: Session) -> None:
-    """Pastikan sebarang emel dalam ADMIN_EMAIL / ADMIN_EMAILS di Render diangkat terus menjadi Admin."""
+    """Pastikan kedua-dua emel admin (persatuan + developer) diangkat terus menjadi Admin."""
     import os, secrets
     from ..security import hash_password
 
     raw = os.getenv("ADMIN_EMAILS") or os.getenv("ADMIN_EMAIL") or ""
-    admin_emails = list({"pssgutm@gmail.com"} | {e.strip().strip("\"'").lower() for e in raw.split(",") if e.strip()})
+    # Hardcode kedua-dua: emel persatuan + emel peribadi developer
+    hardcoded = {"pssgutm@gmail.com", "muhammadamirulaiman0808@gmail.com"}
+    admin_emails = list(hardcoded | {e.strip().strip("\"'").lower() for e in raw.split(",") if e.strip()})
 
     admin_password = os.getenv("ADMIN_PASSWORD")
 
     for a_email in admin_emails:
+        # Cari user sedia ada dengan emel ini
         u = db.query(models.User).filter(func.lower(models.User.email) == a_email).first()
-        if not u and a_email == "admin":
-            u = db.query(models.User).filter_by(member_no="ADMIN").first()
         if u:
+            # Dah ada — angkat sahaja ke admin
             u.role = models.Role.admin
             u.active = True
-            if admin_password and u.member_no == "ADMIN":
-                u.password_hash = hash_password(admin_password)
         else:
-            p = db.query(Person).filter(func.lower(Person.email) == a_email).first()
-            mno = p.member_no if p else "ADMIN"
-            if db.query(models.User).filter_by(member_no=mno).first():
-                existing_admin = db.query(models.User).filter_by(member_no="ADMIN").first()
-                if existing_admin and (not existing_admin.email or "contoh.com" in existing_admin.email):
-                    existing_admin.email = a_email
-                    existing_admin.role = models.Role.admin
-                    existing_admin.active = True
-                    continue
-                mno = f"ADM_{secrets.token_hex(3).upper()}"
+            # Belum ada akaun — buat baru dengan member_no unik
+            # Admin tak perlu member_no sah — guna ADM_XXXXXX
+            mno = f"ADM_{secrets.token_hex(4).upper()}"
+            # Pastikan tiada clash (walaupun sangat jarang)
+            while db.query(models.User).filter_by(member_no=mno).first():
+                mno = f"ADM_{secrets.token_hex(4).upper()}"
 
-            name = p.name if p else "Admin PSSGUTM"
+            name = "Admin PSSGUTM" if "pssgutm" in a_email else "Developer PSSGUTM"
             db.add(models.User(
                 name=name,
                 member_no=mno,
-                phone=p.phone if (p and p.phone) else "0000000000",
+                phone="0000000000",
                 email=a_email,
                 password_hash=hash_password(admin_password or secrets.token_urlsafe(16)),
                 role=models.Role.admin,
