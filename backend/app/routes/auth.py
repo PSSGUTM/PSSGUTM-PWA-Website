@@ -1,11 +1,12 @@
 import hashlib
+import os
 import re
 import secrets
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, EmailStr, Field, field_validator
-from sqlalchemy import or_
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from .. import config, mailer, models
@@ -323,37 +324,92 @@ def google_login(data: GoogleIn, db: Session = Depends(get_db)):
         info = google_auth.verify(data.credential)
     except google_auth.GoogleAuthError as e:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, str(e))
-    user = db.query(models.User).filter(models.User.email == info["email"]).first()
+
+    email_clean = (info.get("email") or "").strip().lower()
+    admin_env_email = (os.getenv("ADMIN_EMAIL") or "").strip().lower()
+
+    # 1. Jika emel Google ini sepadan dengan ADMIN_EMAIL, terus log masuk sebagai Admin
+    if admin_env_email and email_clean == admin_env_email:
+        admin_u = db.query(models.User).filter(func.lower(models.User.email) == admin_env_email).first()
+        if not admin_u:
+            admin_u = db.query(models.User).filter_by(member_no="ADMIN").first()
+        if not admin_u:
+            admin_u = models.User(
+                name="Admin BKK",
+                member_no="ADMIN",
+                phone="0000000000",
+                email=admin_env_email,
+                password_hash=hash_password(secrets.token_urlsafe(24)),
+                role=models.Role.admin,
+                active=True,
+            )
+            db.add(admin_u)
+        else:
+            admin_u.email = admin_env_email
+            admin_u.role = models.Role.admin
+            admin_u.active = True
+        db.commit()
+        db.refresh(admin_u)
+        return TokenOut(access_token=create_token(admin_u.id), user=admin_u)
+
+    # 2. Cari akaun User sedia ada mengikut emel (case-insensitive)
+    user = db.query(models.User).filter(func.lower(models.User.email) == email_clean).first()
     if user is not None:
         if not user.active:
             raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Akaun dinyahaktifkan. Hubungi BKK.")
         return TokenOut(access_token=create_token(user.id), user=user)
-    # Emel ada dalam senarai ahli/alumni yang diimport admin: akaun dicipta terus, tiada borang daftar
+
+    # 3. Emel ada dalam senarai ahli/alumni (Person): akaun dicipta terus, tiada borang daftar
     from ..models_main import Person
-    person = db.query(Person).filter(Person.email == info["email"], Person.active.is_(True)).first()
+    person = db.query(Person).filter(func.lower(Person.email) == email_clean, Person.active.is_(True)).first()
     if person is not None and not data.member_no:
         col = db.query(models.College).filter_by(code=person.college).first() if person.college else None
         mno = person.member_no or f"P{person.id}"
         if db.query(models.User).filter(models.User.member_no == mno).first():
             mno = f"{mno}-{person.id}"   # no. SSG tidak unik: jadikan unik untuk akaun log masuk
+
+        gender_val = None
+        if person.gender in ("L", "male"):
+            gender_val = models.Gender.male
+        elif person.gender in ("P", "female"):
+            gender_val = models.Gender.female
+
         user = models.User(
-            name=person.name, member_no=mno, phone=person.phone or "0000000000", email=info["email"],
-            password_hash=hash_password(secrets.token_urlsafe(24)), role=models.Role.member,
-            gender=models.Gender(person.gender) if person.gender in ("male", "female") else None,
-            college_id=col.id if col else None, college_other="" if col else person.college,
-            block=person.block or "")
+            name=person.name,
+            member_no=mno,
+            phone=person.phone or "0000000000",
+            email=email_clean,
+            password_hash=hash_password(secrets.token_urlsafe(24)),
+            role=models.Role.member,
+            gender=gender_val,
+            college_id=col.id if col else None,
+            college_other="" if col else person.college,
+            block=person.block or "",
+            active=True,
+        )
         db.add(user)
         db.commit()
         db.refresh(user)
         return TokenOut(access_token=create_token(user.id), user=user)
+
     if not data.member_no or not data.phone:
-        return {"needs_registration": True, "email": info["email"], "name": info["name"]}
+        return {"needs_registration": True, "email": email_clean, "name": info.get("name") or ""}
+
     try:
-        reg = RegisterIn(name=(data.name or info["name"] or "Ahli").strip() or "Ahli", member_no=data.member_no,
-                         phone=data.phone, email=info["email"], password=secrets.token_urlsafe(24),
-                         gender=data.gender, college_code=data.college_code, college_other=data.college_other,
-                         is_driver=data.is_driver, short_name=data.short_name, block=data.block,
-                         pickup_point_id=data.pickup_point_id)
+        reg = RegisterIn(
+            name=(data.name or info.get("name") or "Ahli").strip() or "Ahli",
+            member_no=data.member_no,
+            phone=data.phone,
+            email=email_clean,
+            password=secrets.token_urlsafe(24),
+            gender=data.gender,
+            college_code=data.college_code,
+            college_other=data.college_other,
+            is_driver=data.is_driver,
+            short_name=data.short_name,
+            block=data.block,
+            pickup_point_id=data.pickup_point_id,
+        )
     except ValueError as e:
         raise HTTPException(400, str(e))
-    return register(reg, db)   # peraturan senarai ahli, kolej dan checkpoint yang sama dengan pendaftaran biasa
+    return register(reg, db)

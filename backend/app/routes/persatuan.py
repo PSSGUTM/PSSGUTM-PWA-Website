@@ -487,6 +487,44 @@ def ensure_seed(db: Session) -> None:
     except Exception:
         db.rollback()
 
+    # 6. Pastikan akaun Admin BKK wujud & aktif berdasarkan ADMIN_EMAIL di env
+    try:
+        ensure_admin_user(db)
+    except Exception:
+        db.rollback()
+
+
+def ensure_admin_user(db: Session) -> None:
+    """Pastikan akaun admin sentiasa wujud & aktif berdasarkan ADMIN_EMAIL & ADMIN_PASSWORD di env."""
+    import os, secrets
+    from ..security import hash_password
+
+    admin_email = (os.getenv("ADMIN_EMAIL") or "").strip().lower()
+    admin_password = os.getenv("ADMIN_PASSWORD")
+    if not admin_email:
+        return
+
+    admin_u = db.query(models.User).filter(func.lower(models.User.email) == admin_email).first()
+    if not admin_u:
+        admin_u = db.query(models.User).filter_by(member_no="ADMIN").first()
+    if not admin_u:
+        db.add(models.User(
+            name="Admin BKK",
+            member_no="ADMIN",
+            phone="0000000000",
+            email=admin_email,
+            password_hash=hash_password(admin_password or secrets.token_urlsafe(16)),
+            role=models.Role.admin,
+            active=True,
+        ))
+    else:
+        admin_u.email = admin_email
+        admin_u.role = models.Role.admin
+        admin_u.active = True
+        if admin_password:
+            admin_u.password_hash = hash_password(admin_password)
+    db.commit()
+
 
 # ---------------------------------------------------------------- bantuan
 
