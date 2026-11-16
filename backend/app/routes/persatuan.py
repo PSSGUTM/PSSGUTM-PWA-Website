@@ -437,6 +437,20 @@ def get_person(pid: int, db: Session = Depends(get_db)):
             "attended": db.query(AttendRecord).filter_by(person_id=pid).count()}
 
 
+@router.delete("/people/{pid}", dependencies=[Depends(require_admin)])
+def delete_person(pid: int, db: Session = Depends(get_db)):
+    p = db.get(Person, pid)
+    if p is None:
+        raise HTTPException(404, "Tak jumpa")
+    db.query(BeltHistory).filter_by(person_id=pid).delete()
+    db.query(Post).filter_by(person_id=pid).delete()
+    db.query(AttendRecord).filter_by(person_id=pid).delete()
+    db.query(Loan).filter_by(person_id=pid).delete()
+    db.delete(p)
+    db.commit()
+    return {"ok": True, "id": pid}
+
+
 # ---------------------------------------------------------------- SG -> SSG
 
 class ConvertIn(BaseModel):

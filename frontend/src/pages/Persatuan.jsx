@@ -70,18 +70,22 @@ function Ahli() {
           <span className="small muted">{p.member_no} · {p.kind === "SG" ? `Ahli · ${p.belt || "tiada bengkung"}` : "Alumni"} · {p.email}</span>
         </div>
       ))}
-      {edit && <PersonForm init={edit} belts={belts || []} onClose={() => setEdit(null)} onSaved={() => { setEdit(null); load(); toast("Disimpan"); }} />}
+      {edit && <PersonForm init={edit} belts={belts || []} onClose={() => setEdit(null)} onSaved={() => { setEdit(null); load(); toast("Disimpan"); }} onDeleted={() => { setEdit(null); load(); toast("Rekod dipadam"); }} />}
     </div>
   );
 }
 
-function PersonForm({ init, belts, onClose, onSaved }) {
+function PersonForm({ init, belts, onClose, onSaved, onDeleted }) {
   const [f, setF] = useState(init);
   const set = (k) => (e) => setF({ ...f, [k]: e.target.type === "checkbox" ? e.target.checked : e.target.value });
   const save = (ev) => {
     ev.preventDefault();
     const body = { ...f, belt_id: f.belt_id ? Number(f.belt_id) : null, belt_date: f.belt_date || null, study_end: f.kind === "SG" ? (f.study_end || null) : null };
     (f.id ? api.put(`/persatuan/people/${f.id}`, body) : api.post("/persatuan/people", body)).then(onSaved).catch(fail);
+  };
+  const del = () => {
+    if (!confirm(`Padam rekod ${f.name} (${f.member_no || f.email})? Tindakan ini tidak boleh dibatalkan.`)) return;
+    api.del(`/persatuan/people/${f.id}`).then(onDeleted || onSaved).catch(fail);
   };
   return (
     <form className="card" onSubmit={save}>
@@ -109,7 +113,15 @@ function PersonForm({ init, belts, onClose, onSaved }) {
       <label className="check"><input type="checkbox" checked={f.is_coach} onChange={set("is_coach")} /> Jurulatih</label>
       <label className="check"><input type="checkbox" checked={f.active} onChange={set("active")} /> Aktif</label>
       <label className="small">Catatan<input value={f.note} onChange={set("note")} /></label>
-      <div className="actions"><button className="btn">Simpan</button><button type="button" className="btn ghost" onClick={onClose}>Batal</button></div>
+      <div className="actions" style={{ display: "flex", gap: "0.5rem", alignItems: "center", flexWrap: "wrap" }}>
+        <button className="btn">Simpan</button>
+        <button type="button" className="btn ghost" onClick={onClose}>Batal</button>
+        {f.id && (
+          <button type="button" className="link danger" style={{ marginLeft: "auto", color: "#e74c3c" }} onClick={del}>
+            🗑️ Padam rekod ini
+          </button>
+        )}
+      </div>
     </form>
   );
 }
