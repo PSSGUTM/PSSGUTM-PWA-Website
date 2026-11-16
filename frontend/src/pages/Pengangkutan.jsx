@@ -21,13 +21,25 @@ export default function Pengangkutan({ user }) {
     return noPhone || noCollege || noBlock;
   };
   const incomplete = isIncomplete(user);
+  const incompleteMsg = (u) => {
+    if (!u) return "";
+    const noPhone = !u.phone || u.phone.trim() === "" || u.phone === "0000000000";
+    const noCollege = !u.college_id && !u.college_other;
+    const isDriver = u.role === "driver";
+    const noBlock = !isDriver && u.college_id && (!u.block || u.block.trim() === "");
+    const parts = [];
+    if (noPhone) parts.push("nombor telefon");
+    if (noCollege) parts.push("kolej kediaman");
+    if (noBlock) parts.push("nombor bilik");
+    return `Sila lengkapkan ${parts.join(", ")} anda sebelum menempah atau menjadi prebet.`;
+  };
 
   return (
     <div>
       {incomplete && (
         <div className="note" style={{ background: "rgba(212, 169, 78, 0.15)", border: "1px solid var(--accent)", borderRadius: 12, padding: ".8rem 1rem", marginBottom: "1rem" }}>
           <b style={{ color: "var(--accent)" }}>⚠️ Profil Belum Lengkap</b>
-          <p className="small muted" style={{ margin: ".3rem 0 .5rem" }}>Sila lengkapkan nombor telefon, kolej kediaman dan nombor bilik anda sebelum menempah atau menjadi prebet.</p>
+          <p className="small muted" style={{ margin: ".3rem 0 .5rem" }}>{incompleteMsg(user)}</p>
           <Link to="/profil" className="btn small" style={{ display: "inline-block" }}>Lengkapkan Profil</Link>
         </div>
       )}

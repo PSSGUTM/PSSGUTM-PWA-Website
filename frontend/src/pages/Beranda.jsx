@@ -31,6 +31,18 @@ export default function Beranda() {
     return noPhone || noCollege || noBlock;
   };
   const incomplete = isIncomplete(profile);
+  const incompleteMsg = (u) => {
+    if (!u) return "";
+    const noPhone = !u.phone || u.phone.trim() === "" || u.phone === "0000000000";
+    const noCollege = !u.college_id && !u.college_other;
+    const isDriver = u.role === "driver";
+    const noBlock = !isDriver && u.college_id && (!u.block || u.block.trim() === "");
+    const parts = [];
+    if (noPhone) parts.push("nombor telefon");
+    if (noCollege) parts.push("kolej");
+    if (noBlock) parts.push("nombor bilik");
+    return `Sila lengkapkan ${parts.join(", ")} untuk membuka akses perkhidmatan penuh.`;
+  };
 
   useEffect(() => {
     const f = () => setFav(loadFav());
@@ -50,7 +62,7 @@ export default function Beranda() {
         <div className="note" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: "rgba(212, 169, 78, 0.15)", border: "1px solid var(--accent)", borderRadius: 12, padding: ".8rem 1rem", margin: "0 0 1rem", gap: "1rem" }}>
           <div>
             <b style={{ color: "var(--accent)" }}>⚠️ Profil Anda Belum Lengkap</b>
-            <p className="small muted" style={{ margin: ".2rem 0 0" }}>Sila lengkapkan nombor telefon, kolej dan nombor bilik untuk membuka akses perkhidmatan penuh.</p>
+            <p className="small muted" style={{ margin: ".2rem 0 0" }}>{incompleteMsg(profile)}</p>
           </div>
           <Link to="/profil" className="btn small" style={{ flex: "none", margin: 0, padding: ".4rem .8rem" }}>Lengkapkan</Link>
         </div>
