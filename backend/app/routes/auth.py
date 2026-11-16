@@ -21,8 +21,8 @@ def is_admin_email(email: str) -> bool:
     if not email:
         return False
     raw = os.getenv("ADMIN_EMAILS") or os.getenv("ADMIN_EMAIL") or ""
-    admins = {e.strip().lower() for e in raw.split(",") if e.strip()}
-    return email.strip().lower() in admins
+    admins = {e.strip().strip("\"'").lower() for e in raw.split(",") if e.strip()}
+    return email.strip().strip("\"'").lower() in admins
 
 
 def clean_phone(v: str) -> str:
@@ -349,6 +349,17 @@ def google_login(data: GoogleIn, db: Session = Depends(get_db)):
             from ..models_main import Person
             p = db.query(Person).filter(func.lower(Person.email) == email_clean).first()
             mno = p.member_no if p else "ADMIN"
+            if db.query(models.User).filter_by(member_no=mno).first():
+                existing_admin = db.query(models.User).filter_by(member_no="ADMIN").first()
+                if existing_admin and (not existing_admin.email or "contoh.com" in existing_admin.email):
+                    existing_admin.email = email_clean
+                    existing_admin.role = models.Role.admin
+                    existing_admin.active = True
+                    db.commit()
+                    db.refresh(existing_admin)
+                    return TokenOut(access_token=create_token(existing_admin.id), user=existing_admin)
+                mno = f"ADM_{secrets.token_hex(3).upper()}"
+
             name = p.name if p else (info.get("name") or "Admin PSSGUTM")
             col = db.query(models.College).filter_by(code=p.college).first() if (p and p.college) else None
             admin_u = models.User(

@@ -500,7 +500,7 @@ def ensure_admin_user(db: Session) -> None:
     from ..security import hash_password
 
     raw = os.getenv("ADMIN_EMAILS") or os.getenv("ADMIN_EMAIL") or ""
-    admin_emails = [e.strip().lower() for e in raw.split(",") if e.strip()]
+    admin_emails = [e.strip().strip("\"'").lower() for e in raw.split(",") if e.strip()]
     if not admin_emails:
         return
 
@@ -517,7 +517,16 @@ def ensure_admin_user(db: Session) -> None:
                 u.password_hash = hash_password(admin_password)
         else:
             p = db.query(Person).filter(func.lower(Person.email) == a_email).first()
-            mno = p.member_no if p else ("ADMIN" if "admin" in a_email else f"ADM_{a_email.split('@')[0]}")
+            mno = p.member_no if p else "ADMIN"
+            if db.query(models.User).filter_by(member_no=mno).first():
+                existing_admin = db.query(models.User).filter_by(member_no="ADMIN").first()
+                if existing_admin and (not existing_admin.email or "contoh.com" in existing_admin.email):
+                    existing_admin.email = a_email
+                    existing_admin.role = models.Role.admin
+                    existing_admin.active = True
+                    continue
+                mno = f"ADM_{secrets.token_hex(3).upper()}"
+
             name = p.name if p else "Admin PSSGUTM"
             db.add(models.User(
                 name=name,
