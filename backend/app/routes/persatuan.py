@@ -495,34 +495,39 @@ def ensure_seed(db: Session) -> None:
 
 
 def ensure_admin_user(db: Session) -> None:
-    """Pastikan akaun admin sentiasa wujud & aktif berdasarkan ADMIN_EMAIL & ADMIN_PASSWORD di env."""
+    """Pastikan sebarang emel dalam ADMIN_EMAIL / ADMIN_EMAILS di Render diangkat terus menjadi Admin."""
     import os, secrets
     from ..security import hash_password
 
-    admin_email = (os.getenv("ADMIN_EMAIL") or "").strip().lower()
-    admin_password = os.getenv("ADMIN_PASSWORD")
-    if not admin_email:
+    raw = os.getenv("ADMIN_EMAILS") or os.getenv("ADMIN_EMAIL") or ""
+    admin_emails = [e.strip().lower() for e in raw.split(",") if e.strip()]
+    if not admin_emails:
         return
 
-    admin_u = db.query(models.User).filter(func.lower(models.User.email) == admin_email).first()
-    if not admin_u:
-        admin_u = db.query(models.User).filter_by(member_no="ADMIN").first()
-    if not admin_u:
-        db.add(models.User(
-            name="Admin BKK",
-            member_no="ADMIN",
-            phone="0000000000",
-            email=admin_email,
-            password_hash=hash_password(admin_password or secrets.token_urlsafe(16)),
-            role=models.Role.admin,
-            active=True,
-        ))
-    else:
-        admin_u.email = admin_email
-        admin_u.role = models.Role.admin
-        admin_u.active = True
-        if admin_password:
-            admin_u.password_hash = hash_password(admin_password)
+    admin_password = os.getenv("ADMIN_PASSWORD")
+
+    for a_email in admin_emails:
+        u = db.query(models.User).filter(func.lower(models.User.email) == a_email).first()
+        if not u and a_email == "admin":
+            u = db.query(models.User).filter_by(member_no="ADMIN").first()
+        if u:
+            u.role = models.Role.admin
+            u.active = True
+            if admin_password and u.member_no == "ADMIN":
+                u.password_hash = hash_password(admin_password)
+        else:
+            p = db.query(Person).filter(func.lower(Person.email) == a_email).first()
+            mno = p.member_no if p else ("ADMIN" if "admin" in a_email else f"ADM_{a_email.split('@')[0]}")
+            name = p.name if p else "Admin PSSGUTM"
+            db.add(models.User(
+                name=name,
+                member_no=mno,
+                phone=p.phone if (p and p.phone) else "0000000000",
+                email=a_email,
+                password_hash=hash_password(admin_password or secrets.token_urlsafe(16)),
+                role=models.Role.admin,
+                active=True,
+            ))
     db.commit()
 
 

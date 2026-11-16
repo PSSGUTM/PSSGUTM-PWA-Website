@@ -17,6 +17,14 @@ from ..services import booking as svc
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
+def is_admin_email(email: str) -> bool:
+    if not email:
+        return False
+    raw = os.getenv("ADMIN_EMAILS") or os.getenv("ADMIN_EMAIL") or ""
+    admins = {e.strip().lower() for e in raw.split(",") if e.strip()}
+    return email.strip().lower() in admins
+
+
 def clean_phone(v: str) -> str:
     digits = re.sub(r"[^\d+]", "", v)
     if len(digits) < 9:
@@ -176,9 +184,16 @@ def register(data: RegisterIn, db: Session = Depends(get_db)):
 def login(data: LoginIn, db: Session = Depends(get_db)):
     ident = data.identifier.strip()
     user = db.query(models.User).filter(
-        or_(models.User.member_no == ident.upper(), models.User.email == ident.lower())).first()
+        or_(models.User.member_no == ident.upper(), func.lower(models.User.email) == ident.lower())).first()
     if user is None or not verify_password(data.password, user.password_hash) or not user.active:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Maklumat login salah")
+
+    # Jika emel pengguna tersenarai dalam ADMIN_EMAIL / ADMIN_EMAILS, auto-angkat menjadi Admin
+    if is_admin_email(user.email) and user.role != models.Role.admin:
+        user.role = models.Role.admin
+        db.commit()
+        db.refresh(user)
+
     return TokenOut(access_token=create_token(user.id), user=user)
 
 
@@ -326,26 +341,28 @@ def google_login(data: GoogleIn, db: Session = Depends(get_db)):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, str(e))
 
     email_clean = (info.get("email") or "").strip().lower()
-    admin_env_email = (os.getenv("ADMIN_EMAIL") or "").strip().lower()
 
-    # 1. Jika emel Google ini sepadan dengan ADMIN_EMAIL, terus log masuk sebagai Admin
-    if admin_env_email and email_clean == admin_env_email:
-        admin_u = db.query(models.User).filter(func.lower(models.User.email) == admin_env_email).first()
+    # 1. Jika emel Google ini sepadan dengan ADMIN_EMAIL / ADMIN_EMAILS di Render, jadikan/log masuk terus sebagai Admin
+    if is_admin_email(email_clean):
+        admin_u = db.query(models.User).filter(func.lower(models.User.email) == email_clean).first()
         if not admin_u:
-            admin_u = db.query(models.User).filter_by(member_no="ADMIN").first()
-        if not admin_u:
+            from ..models_main import Person
+            p = db.query(Person).filter(func.lower(Person.email) == email_clean).first()
+            mno = p.member_no if p else "ADMIN"
+            name = p.name if p else (info.get("name") or "Admin PSSGUTM")
+            col = db.query(models.College).filter_by(code=p.college).first() if (p and p.college) else None
             admin_u = models.User(
-                name="Admin BKK",
-                member_no="ADMIN",
-                phone="0000000000",
-                email=admin_env_email,
+                name=name,
+                member_no=mno,
+                phone=p.phone if (p and p.phone) else "0000000000",
+                email=email_clean,
                 password_hash=hash_password(secrets.token_urlsafe(24)),
                 role=models.Role.admin,
+                college_id=col.id if col else None,
                 active=True,
             )
             db.add(admin_u)
         else:
-            admin_u.email = admin_env_email
             admin_u.role = models.Role.admin
             admin_u.active = True
         db.commit()
