@@ -90,7 +90,7 @@ function PersonForm({ init, belts, onClose, onSaved, onDeleted }) {
   return (
     <form className="card" onSubmit={save}>
       <h3>{f.id ? "Kemas kini rekod" : "Tambah rekod"}</h3>
-      {f.member_no && <p className="small muted">No. ahli: <b>{f.member_no}</b> (dijana sistem)</p>}
+      <label className="small">No. ahli (cth SG2526001)<input value={f.member_no || ""} onChange={set("member_no")} placeholder="Kosongkan jika mahu sistem jana automatik" /></label>
       <label className="small">Nama penuh<input required value={f.name} onChange={set("name")} /></label>
       <label className="small">Emel Google<input required type="email" value={f.email} onChange={set("email")} /></label>
       <label className="small">No. telefon<input value={f.phone} onChange={set("phone")} /></label>

@@ -296,6 +296,7 @@ class PersonIn(BaseModel):
     gender: str | None = None
     intake: str
     kind: str = "SG"
+    member_no: str = ""
     study_end: date | None = None
     study_level: str = ""
     college: str = ""
@@ -327,7 +328,9 @@ def _apply(db, p: Person, d: PersonIn, existing_sg: set[str]):
     if d.kind == "SSG":      # alumni: bengkung tidak disimpan
         d.belt_id, d.belt_date = None, None
     p.belt_id, p.belt_date = d.belt_id, d.belt_date
-    if not p.member_no or old_kind != p.kind or old_intake != p.intake:
+    if d.member_no and d.member_no.strip():
+        p.member_no = d.member_no.strip().upper()
+    elif not p.member_no or old_kind != p.kind or old_intake != p.intake:
         if p.kind == "SSG":
             p.member_no = pp.ssg_no(p.intake)
         else:
@@ -339,13 +342,43 @@ def _sg_numbers(db) -> set[str]:
     return {n for (n,) in db.query(Person.member_no).filter(Person.member_no.like("SG%")) if n}
 
 
-def sync_person_to_roster(db: Session, p: Person):
-    """Selaraskan rekod Person ke MemberRoster (Transport) supaya ahli terus layak guna pengangkutan."""
+def sync_person_to_roster(db: Session, p: Person, old_mno: str | None = None):
+    """Selaraskan rekod Person ke MemberRoster (Transport) dan User jika ada perubahan nombor ahli."""
     try:
         if not p.member_no or p.kind != "SG":
             return
         mno = p.member_no.strip().upper()
         col = db.query(models.College).filter_by(code=p.college.upper()).first() if p.college else None
+
+        # Jika nombor ahli berubah daripada nombor lama
+        if old_mno and old_mno.strip().upper() != mno:
+            old_upper = old_mno.strip().upper()
+            old_r = db.query(models.MemberRoster).filter_by(member_no=old_upper).first()
+            if old_r:
+                existing_new_r = db.query(models.MemberRoster).filter_by(member_no=mno).first()
+                if existing_new_r:
+                    db.delete(old_r)
+                else:
+                    old_r.member_no = mno
+
+            # Kemas kini akaun User berdaftar dan hantar notifikasi
+            from sqlalchemy import or_
+            user = db.query(models.User).filter(
+                or_(func.lower(models.User.email) == (p.email or "").strip().lower(),
+                    models.User.member_no == old_upper)
+            ).first()
+            if user and user.member_no != mno:
+                prev_user_mno = user.member_no
+                user.member_no = mno
+                svc._notify(
+                    db,
+                    user.id,
+                    "member_no",
+                    f"Nombor Ahli Anda Dikemas Kini: {mno}",
+                    f"Nombor ahli PSSGUTM anda telah dikemas kini daripada {prev_user_mno} kepada {mno} oleh pihak pentadbir persatuan. Sila gunakan nombor ahli baharu ini ({mno}) untuk sebarang urusan persatuan atau log masuk.",
+                    severity="warning"
+                )
+
         r = db.query(models.MemberRoster).filter_by(member_no=mno).first()
         if r is None:
             r = models.MemberRoster(member_no=mno)
@@ -419,11 +452,12 @@ def update_person(pid: int, data: PersonIn, db: Session = Depends(get_db)):
     other = db.query(Person).filter(func.lower(Person.email) == data.email.strip().lower(), Person.id != pid).first()
     if other:
         raise HTTPException(409, "Emel itu dipakai rekod lain")
+    old_mno = p.member_no
     prev = (p.belt_id, p.belt_date)
     _apply(db, p, data, _sg_numbers(db))
     if p.belt_id and (p.belt_id, p.belt_date) != prev:
         db.add(BeltHistory(person_id=p.id, belt_id=p.belt_id, on_date=p.belt_date))
-    sync_person_to_roster(db, p)
+    sync_person_to_roster(db, p, old_mno=old_mno)
     db.commit()
     return person_out(db, p)
 
@@ -652,10 +686,17 @@ async def import_csv(file: UploadFile = File(...), db: Session = Depends(get_db)
             continue
 
         p = None
-        if mno:
-            p = db.query(Person).filter_by(member_no=mno).first()
-        if p is None and email and "@" in email:
+        # 1. Padankan mengikut emel dahulu (supaya jika nombor ahli berubah, rekod lama tetap dijumpai)
+        if email and "@" in email and not email.endswith("@pssgutm.local"):
             p = db.query(Person).filter(func.lower(Person.email) == email).first()
+        # 2. Jika tiada emel, padankan mengikut nombor ahli
+        if p is None and mno:
+            p = db.query(Person).filter_by(member_no=mno).first()
+        # 3. Jika masih tiada, padankan mengikut nama penuh yang tepat
+        if p is None and name and len(name.strip()) >= 3:
+            p = db.query(Person).filter(func.lower(Person.name) == name.strip().lower()).first()
+
+        old_mno = p.member_no if p else None
 
         created = p is None
         if created:
@@ -688,7 +729,7 @@ async def import_csv(file: UploadFile = File(...), db: Session = Depends(get_db)
             sg.add(p.member_no)
 
         db.flush()
-        sync_person_to_roster(db, p)
+        sync_person_to_roster(db, p, old_mno=old_mno)
         added += created
         updated += (not created)
 
