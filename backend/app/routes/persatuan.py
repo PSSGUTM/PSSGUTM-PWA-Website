@@ -1,6 +1,7 @@
 """Modul utama PSSGUTM: ahli/alumni, bengkung, jawatan, import, SG->SSG, kehadiran (QR), inventori."""
 import csv
 import io
+import re
 import secrets
 from datetime import date, datetime
 
@@ -17,6 +18,33 @@ from ..security import get_current_user, require_admin
 from ..services import people as pp
 from ..services import booking as svc
 from .bookings import save_upload
+
+# Pautan senarai ahli rasmi (untuk rujukan semak nombor ahli)
+ROSTER_SHEET_URL = "https://docs.google.com/spreadsheets/d/1RkEQYsnG3n7-_fg98flrrQajSXWy2uYKXW2uVkC8xYE/edit?usp=sharing"
+
+
+def is_valid_sg_intake(intake: str) -> bool:
+    """Semak sama ada kod intake SG sah (4 digit, tahun bersebelahan: yy2 = yy1 + 1).
+    Contoh sah:   2425, 2526, 2627, 2728
+    Contoh tidak sah: 2626 (sama), 2628 (tak bersebelahan), 2436 (jauh)
+    """
+    if not intake or len(intake) != 4:
+        return False
+    try:
+        y1, y2 = int(intake[:2]), int(intake[2:])
+        return y2 == y1 + 1
+    except ValueError:
+        return False
+
+
+def is_valid_sg_no(mno: str) -> bool:
+    """Semak sama ada nombor ahli SG sah format dan kod tahun."""
+    if not mno:
+        return False
+    m = re.match(r'^SG(\d{4})(\d{3})$', mno.strip().upper())
+    if not m:
+        return False
+    return is_valid_sg_intake(m.group(1))
 
 router = APIRouter(prefix="/persatuan", tags=["persatuan"])
 
@@ -112,6 +140,52 @@ def migrate_legacy_members(db: Session) -> None:
         db.rollback()
 
 
+def notify_invalid_member_nos(db: Session) -> None:
+    """Scan semua no ahli SG, cari yang tahunnya bukan bersebelahan (cth SG2626xxx, SG2628xxx),
+    dan hantar notifikasi kepada pengguna yang mempunyai no ahli tersebut.
+    Guard menggunakan Setting supaya notifikasi tidak dihantar berulang kali."""
+    from sqlalchemy import or_
+    GUARD_KEY = "notified_invalid_sg_no_v1"
+    guard = db.get(models.Setting, GUARD_KEY)
+    if guard is not None:
+        return  # sudah dijalankan sebelum ini
+
+    invalid_persons = [
+        p for p in db.query(Person).filter(Person.member_no.like("SG%")).all()
+        if p.member_no and not is_valid_sg_no(p.member_no)
+    ]
+
+    notified = 0
+    for p in invalid_persons:
+        mno = (p.member_no or "").strip().upper()
+        # Cari User berdaftar
+        user = db.query(models.User).filter(
+            or_(func.lower(models.User.email) == (p.email or "").strip().lower(),
+                models.User.member_no == mno)
+        ).first()
+        if user:
+            svc._notify(
+                db,
+                user.id,
+                "member_no_invalid",
+                f"Semak Nombor Ahli Anda: {mno}",
+                f"Nombor ahli anda ({mno}) mungkin mengandungi ralat — kod tahun tidak bersebelahan "
+                f"(contoh betul: SG2627001, SG2728001).\n\n"
+                f"Adakah anda {p.name}? Jika bukan, atau jika nombor ahli anda kelihatan salah, "
+                f"sila semak nombor ahli yang betul di pautan berikut dan hubungi BKK untuk pembetulan:\n"
+                f"{ROSTER_SHEET_URL}",
+                severity="warning"
+            )
+            notified += 1
+
+    # Tandakan bahawa semakan ini telah selesai
+    db.merge(models.Setting(key=GUARD_KEY, value=f"done:{notified} notified"))
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+
+
 def ensure_seed(db: Session) -> None:
     """Biro asas dan penyelarasan awal. Dijalankan setiap deploy, selamat diulang."""
     try:
@@ -137,6 +211,12 @@ def ensure_seed(db: Session) -> None:
     # 2. Migrasi ahli daripada MemberRoster & User ke Person
     try:
         migrate_legacy_members(db)
+    except Exception:
+        db.rollback()
+
+    # 3. Semak dan notifikasi ahli yang ada nombor ahli tidak sah (tahun bukan bersebelahan)
+    try:
+        notify_invalid_member_nos(db)
     except Exception:
         db.rollback()
 
@@ -374,8 +454,10 @@ def sync_person_to_roster(db: Session, p: Person, old_mno: str | None = None):
                     db,
                     user.id,
                     "member_no",
-                    f"Nombor Ahli Anda Dikemas Kini: {mno}",
-                    f"Nombor ahli PSSGUTM anda telah dikemas kini daripada {prev_user_mno} kepada {mno} oleh pihak pentadbir persatuan. Sila gunakan nombor ahli baharu ini ({mno}) untuk sebarang urusan persatuan atau log masuk.",
+                    f"Nombor Ahli Dikemas Kini: {prev_user_mno} → {mno}",
+                    f"Nombor ahli PSSGUTM anda telah dikemas kini daripada {prev_user_mno} kepada {mno} oleh pentadbir persatuan.\n\n"
+                    f"Adakah anda {p.name}? Jika bukan, sila semak nombor ahli anda yang betul di pautan berikut dan hubungi BKK untuk pembetulan:\n{ROSTER_SHEET_URL}\n\n"
+                    f"Gunakan nombor ahli baharu ({mno}) untuk log masuk.",
                     severity="warning"
                 )
 
@@ -735,6 +817,33 @@ async def import_csv(file: UploadFile = File(...), db: Session = Depends(get_db)
 
     db.commit()
     return {"added": added, "updated": updated, "errors": errors[:30], "error_count": len(errors)}
+
+
+# ---------------------------------------------------------------- semak nombor ahli tidak sah
+
+@router.get("/people/invalid-member-nos", dependencies=[Depends(require_admin)])
+def list_invalid_member_nos(db: Session = Depends(get_db)):
+    """Senarai ahli dengan nombor ahli SG yang tahunnya bukan bersebelahan."""
+    invalids = [
+        {"id": p.id, "name": p.name, "member_no": p.member_no,
+         "intake": p.intake, "email": p.email}
+        for p in db.query(Person).filter(Person.member_no.like("SG%")).all()
+        if p.member_no and not is_valid_sg_no(p.member_no)
+    ]
+    return {"count": len(invalids), "items": invalids}
+
+
+@router.post("/people/notify-invalid-member-nos", dependencies=[Depends(require_admin)])
+def retrigger_invalid_member_no_notify(db: Session = Depends(get_db)):
+    """Reset guard dan hantar semula notifikasi kepada ahli dengan no ahli tidak sah."""
+    GUARD_KEY = "notified_invalid_sg_no_v1"
+    guard = db.get(models.Setting, GUARD_KEY)
+    if guard:
+        db.delete(guard)
+        db.commit()
+    notify_invalid_member_nos(db)
+    guard = db.get(models.Setting, GUARD_KEY)
+    return {"ok": True, "result": guard.value if guard else "done"}
 
 
 # ---------------------------------------------------------------- biro, seki, jawatan
