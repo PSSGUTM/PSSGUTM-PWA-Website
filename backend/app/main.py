@@ -75,9 +75,10 @@ for r in (auth.router, member.router, bookings.router, driver.router, admin.rout
     app.include_router(r)
 
 
+@app.get("/")
 @app.get("/health")
 def health():
-    return {"status": "ok"}
+    return {"status": "ok", "app": "PSSGUTM API"}
 
 
 @app.get("/colleges")
