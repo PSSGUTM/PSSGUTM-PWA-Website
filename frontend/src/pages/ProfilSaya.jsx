@@ -25,6 +25,49 @@ export function ProfilSaya({ user }) {
         </div>
         <Link to="/profil" className="btn ghost">Sunting</Link>
       </div>
+
+      {/* Kad Pertanyaan & Pengesahan Nombor Ahli */}
+      <div className="card" style={{
+        background: "linear-gradient(135deg, rgba(107, 31, 31, 0.35), rgba(44, 24, 16, 0.6))",
+        border: "1.5px solid var(--accent, #D4A94E)",
+        borderRadius: 14,
+        padding: "1rem 1.1rem",
+        margin: "0.8rem 0 1rem"
+      }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "0.4rem" }}>
+          <span style={{ fontSize: "1.25rem" }}>⚠️</span>
+          <b style={{ color: "var(--accent, #D4A94E)", fontSize: "1.02rem" }}>
+            Pengesahan Nombor Ahli: {p?.member_no || user.member_no}
+          </b>
+        </div>
+        <p className="small" style={{ lineHeight: 1.6, margin: "0.3rem 0 0.8rem", color: "var(--text, #FDF8F0)" }}>
+          Adakah nombor ahli <b>{p?.member_no || user.member_no}</b> ini milik asal anda?
+          <br /><br />
+          Jika nombor ini <b>bukan milik asal anda</b> (contohnya susunan nombor telah berubah):
+          <br />
+          Nombor ahli anda akan <b>dipindahkan ke nombor yang betul</b> mengikut senarai rasmi, dan <b>SEMUA maklumat anda</b> (sejarah jawatan biro/MT, rekod kehadiran latihan, bengkung, serta perkhidmatan pengangkutan) akan <b>dipindahkan secara automatik ke nombor baharu</b> tersebut tanpa sebarang rekod yang hilang.
+        </p>
+        <div style={{ display: "flex", gap: "0.6rem", flexWrap: "wrap", alignItems: "center" }}>
+          <a
+            href="https://docs.google.com/spreadsheets/d/1RkEQYsnG3n7-_fg98flrrQajSXWy2uYKXW2uVkC8xYE/edit?usp=sharing"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="btn small"
+            style={{ textDecoration: "none", display: "inline-flex", alignItems: "center", gap: "0.3rem", padding: ".45rem .85rem" }}
+          >
+            📋 Semak Senarai Rasmi Ahli
+          </a>
+          <a
+            href={`https://wa.me/?text=${encodeURIComponent("Salam BKK PSSGUTM, saya (" + user.name + ", emel: " + (user.email || "") + ") ingin membuat pengesahan nombor ahli saya.")}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="btn ghost small"
+            style={{ textDecoration: "none", padding: ".45rem .85rem" }}
+          >
+            💬 Hubungi BKK
+          </a>
+        </div>
+      </div>
       <div className="card">
         {p?.kind === "SG" && p.belt && <div className="row"><span className="muted">Bengkung</span><b>{p.belt}</b></div>}
         <div className="row"><span className="muted">Kolej</span><b>{p?.college || user.college || "–"}</b></div>

@@ -52,7 +52,7 @@ export default function Notifications({ limit, notes, setNotes, warningsOnly = f
             <span className="noti-ico">{icon}</span>
             <div className="noti-body">
               <b>{n.title}</b>
-              {n.body && <div className="small">{n.body}</div>}
+              {n.body && <div className="small" style={{ whiteSpace: "pre-line", wordBreak: "break-word", margin: ".25rem 0" }}>{n.body}</div>}
               <div className="noti-date">{when(n.created_at)}</div>
               <div className="small muted">{label}{n.link ? " · tekan untuk buka" : ""}{!n.deletable ? ` · hilang bila selesai, atau boleh dipadam ${fmtDate(n.unlock_date)}` : ""}</div>
             </div>

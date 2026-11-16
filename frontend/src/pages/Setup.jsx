@@ -188,7 +188,14 @@ export default function Setup({ onProfile }) {
           </select>
         )}
         <input placeholder="Blok / bilik (cth B-12-3)" maxLength={40} value={profile.block || ""} onChange={(e) => setProfile({ ...profile, block: e.target.value })} />
-        <p className="muted small">{profile.member_no} · {profile.email}</p>
+        <p className="muted small" style={{ margin: ".3rem 0" }}>
+          No. ahli: <b>{profile.member_no}</b> · {profile.email}
+          <br />
+          <a href="https://docs.google.com/spreadsheets/d/1RkEQYsnG3n7-_fg98flrrQajSXWy2uYKXW2uVkC8xYE/edit?usp=sharing"
+             target="_blank" rel="noopener noreferrer" style={{ color: "var(--accent, #D4A94E)", textDecoration: "underline", fontSize: "0.85em" }}>
+            Semak senarai rasmi ahli jika nombor berbeza
+          </a>
+        </p>
         {profile.credit_balance > 0 && <p className="okmsg small">Kredit anda: RM{profile.credit_balance.toFixed(2)} (digunakan automatik pada latihan seterusnya)</p>}
       </section>
       {err && <p className="error">{err}</p>}

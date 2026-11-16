@@ -169,12 +169,13 @@ def notify_invalid_member_nos(db: Session) -> None:
                 user.id,
                 "member_no_invalid",
                 f"Semak Nombor Ahli Anda: {mno}",
-                f"Nombor ahli anda ({mno}) mungkin mengandungi ralat — kod tahun tidak bersebelahan "
-                f"(contoh betul: SG2627001, SG2728001).\n\n"
-                f"Adakah anda {p.name}? Jika bukan, atau jika nombor ahli anda kelihatan salah, "
-                f"sila semak nombor ahli yang betul di pautan berikut dan hubungi BKK untuk pembetulan:\n"
-                f"{ROSTER_SHEET_URL}",
-                severity="warning"
+                f"Nombor ahli anda ({mno}) mengandungi ralat susunan tahun (contoh betul: SG2425xxx, SG2627xxx).\n\n"
+                f"Adakah anda {p.name}? Jika nombor ini bukan milik asal anda, nombor ahli anda akan dipindahkan ke nombor yang betul, "
+                f"dan SEMUA maklumat anda (rekod kehadiran, jawatan biro/MT, bengkung) akan dipindahkan ke nombor baharu tersebut tanpa hilang rekod.\n\n"
+                f"Sila buat semakan di senarai rasmi: {ROSTER_SHEET_URL}",
+                severity="warning",
+                link="/profil-saya",
+                ref=f"invalid_sg_{mno}"
             )
             notified += 1
 
@@ -182,6 +183,57 @@ def notify_invalid_member_nos(db: Session) -> None:
     db.merge(models.Setting(key=GUARD_KEY, value=f"done:{notified} notified"))
     try:
         db.commit()
+    except Exception:
+        db.rollback()
+
+
+def broadcast_member_no_verification_notice(db: Session) -> None:
+    """Pastikan notifikasi siaran amaran pengesahan nombor ahli wujud untuk semua ahli."""
+    REF_KEY = "verify_member_no_broadcast_v1"
+    body_text = (
+        "Sila pastikan nombor ahli semasa anda adalah milik asal anda.\n\n"
+        "Jika nombor ini bukan milik asal anda (atau berlaku ralat susunan nombor): "
+        "nombor ahli anda akan dipindahkan ke nombor yang betul mengikut senarai rasmi, "
+        "dan SEMUA maklumat anda (sejarah jawatan biro/MT, rekod kehadiran latihan, bengkung, serta perkhidmatan pengangkutan) "
+        "akan dipindahkan sepenuhnya ke nombor baharu tersebut tanpa kehilangan sebarang rekod.\n\n"
+        f"Semak senarai rasmi ahli di: {ROSTER_SHEET_URL}"
+    )
+    existing = db.query(models.Notification).filter_by(user_id=None, ref=REF_KEY).first()
+    if existing is None:
+        db.add(models.Notification(
+            user_id=None,
+            kind="member_no_verify",
+            title="Pengesahan Nombor Ahli PSSGUTM",
+            body=body_text[:500],
+            severity="warning",
+            link="/profil-saya",
+            ref=REF_KEY
+        ))
+    else:
+        existing.title = "Pengesahan Nombor Ahli PSSGUTM"
+        existing.body = body_text[:500]
+        existing.severity = "warning"
+        existing.link = "/profil-saya"
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+
+
+def fix_known_member_number_issues(db: Session) -> None:
+    """Kemas kini pembetulan nombor ahli yang diketahui (cth: Amirul Aiman SG2425024 -> SG2425025)."""
+    try:
+        amirul = db.query(Person).filter(func.lower(Person.email) == "amirul-05@graduate.utm.my").first()
+        if amirul and amirul.member_no == "SG2425024":
+            old_mno = amirul.member_no
+            clash = db.query(Person).filter_by(member_no="SG2425025").first()
+            if clash and clash.id != amirul.id and not clash.email:
+                clash.member_no = "SG2425024_old"
+                db.flush()
+            amirul.member_no = "SG2425025"
+            db.flush()
+            sync_person_to_roster(db, amirul, old_mno=old_mno)
+            db.commit()
     except Exception:
         db.rollback()
 
@@ -217,6 +269,18 @@ def ensure_seed(db: Session) -> None:
     # 3. Semak dan notifikasi ahli yang ada nombor ahli tidak sah (tahun bukan bersebelahan)
     try:
         notify_invalid_member_nos(db)
+    except Exception:
+        db.rollback()
+
+    # 4. Notifikasi broadcast pengesahan nombor ahli untuk semua pengguna
+    try:
+        broadcast_member_no_verification_notice(db)
+    except Exception:
+        db.rollback()
+
+    # 5. Pembetulan nombor ahli yang diketahui (cth: Amirul SG2425024 -> SG2425025)
+    try:
+        fix_known_member_number_issues(db)
     except Exception:
         db.rollback()
 
@@ -449,16 +513,26 @@ def sync_person_to_roster(db: Session, p: Person, old_mno: str | None = None):
             ).first()
             if user and user.member_no != mno:
                 prev_user_mno = user.member_no
+                # Elak pertembungan unique constraint pada User.member_no
+                clash_user = db.query(models.User).filter_by(member_no=mno).first()
+                if clash_user and clash_user.id != user.id:
+                    clash_user.member_no = f"{mno}_old_{clash_user.id}"
+                    db.flush()
                 user.member_no = mno
                 svc._notify(
                     db,
                     user.id,
                     "member_no",
-                    f"Nombor Ahli Dikemas Kini: {prev_user_mno} → {mno}",
-                    f"Nombor ahli PSSGUTM anda telah dikemas kini daripada {prev_user_mno} kepada {mno} oleh pentadbir persatuan.\n\n"
-                    f"Adakah anda {p.name}? Jika bukan, sila semak nombor ahli anda yang betul di pautan berikut dan hubungi BKK untuk pembetulan:\n{ROSTER_SHEET_URL}\n\n"
-                    f"Gunakan nombor ahli baharu ({mno}) untuk log masuk.",
-                    severity="warning"
+                    f"Nombor Ahli Dipindahkan: {prev_user_mno} → {mno}",
+                    f"Nombor ahli PSSGUTM anda telah dipindahkan daripada {prev_user_mno} kepada {mno}.\n\n"
+                    f"Adakah anda {p.name}? Jika nombor lama ({prev_user_mno}) bukan milik asal anda, "
+                    f"semua maklumat dan rekod anda (rekod jawatan biro/MT, kehadiran latihan, bengkung, serta perkhidmatan pengangkutan) "
+                    f"telah dipindahkan secara automatik ke nombor ahli baharu ({mno}) tanpa sebarang rekod yang hilang.\n\n"
+                    f"Sila buat semakan di senarai rasmi ahli PSSGUTM:\n{ROSTER_SHEET_URL}\n\n"
+                    f"Sila gunakan nombor ahli baharu ({mno}) untuk sebarang urusan dan log masuk.",
+                    severity="warning",
+                    link="/profil-saya",
+                    ref=f"mno_change_{mno}"
                 )
 
         r = db.query(models.MemberRoster).filter_by(member_no=mno).first()
