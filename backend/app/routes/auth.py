@@ -74,6 +74,7 @@ class UserOut(BaseModel):
     theme: str = "auto"
     gender_request: str = ""
     prebet_request: bool = False
+    avatar: str = ""
 
     model_config = {"from_attributes": True}
 

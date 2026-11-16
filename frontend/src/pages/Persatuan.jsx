@@ -423,8 +423,29 @@ function Inventori() {
   const [loans, loadLoans] = useLoad("/persatuan/inventory/loans?open_only=false");
   const [nf, setNf] = useState({ name: "", category: "", total: 1, note: "", active: true });
   const [lend, setLend] = useState(null);   // item
+  const fileRefs = useRef({});
   const reload = () => { loadItems(); loadLoans(); };
   const photo = async (name) => window.open(await api.blobUrl(`/persatuan/inventory/photo/${name}`), "_blank");
+
+  const uploadItemPhoto = async (iid, e) => {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    try {
+      await api.upload(`/persatuan/inventory/items/${iid}/image`, f);
+      reload();
+      toast("Gambar barang disimpan ✅");
+    } catch (err) { fail(err); }
+  };
+
+  const deleteItemPhoto = async (iid) => {
+    if (!confirm("Padam gambar barang ini?")) return;
+    try {
+      await api.del(`/persatuan/inventory/items/${iid}/image`);
+      reload();
+      toast("Gambar barang dipadam");
+    } catch (err) { fail(err); }
+  };
+
   if (!items) return <p className="muted">Memuatkan…</p>;
   const open = (loans || []).filter((l) => !l.returned_at);
   return (
@@ -432,11 +453,22 @@ function Inventori() {
       <div className="card">
         <h3>Barang</h3>
         {items.map((i) => (
-          <div className="row small" key={i.id}>
-            <span><b>{i.name}</b> {i.category && <span className="chip">{i.category}</span>}{!i.active && <span className="badge bad">Tidak aktif</span>}<br />Ada {i.available} / {i.total}</span>
-            <span className="seg">
+          <div className="row small" key={i.id} style={{ alignItems: "center", gap: ".6rem" }}>
+            {i.image ? (
+              <img src={imgUrl(i.image)} alt="" style={{ width: 40, height: 40, borderRadius: 8, objectFit: "cover", flexShrink: 0, border: "1px solid var(--line)" }} />
+            ) : (
+              <div style={{ width: 40, height: 40, borderRadius: 8, background: "rgba(255,255,255,0.05)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>📦</div>
+            )}
+            <span style={{ flex: 1, minWidth: 0 }}>
+              <b>{i.name}</b> {i.category && <span className="chip">{i.category}</span>}{!i.active && <span className="badge bad">Tidak aktif</span>}<br />
+              Ada {i.available} / {i.total}
+            </span>
+            <span className="seg" style={{ flexShrink: 0, flexWrap: "wrap" }}>
               <button disabled={!i.active || i.available < 1} onClick={() => setLend(i)}>Pinjam</button>
               <button onClick={() => { const t = prompt("Jumlah baharu", i.total); if (t !== null && !isNaN(+t)) api.put(`/persatuan/inventory/items/${i.id}`, { ...i, total: Number(t) }).then(reload).catch(fail); }}>Jumlah</button>
+              <input type="file" accept="image/*" style={{ display: "none" }} ref={(el) => (fileRefs.current[i.id] = el)} onChange={(e) => uploadItemPhoto(i.id, e)} />
+              <button onClick={() => fileRefs.current[i.id]?.click()}>{i.image ? "📷 Tukar" : "📷 Gambar"}</button>
+              {i.image && <button onClick={() => deleteItemPhoto(i.id)} title="Padam gambar">🗑️</button>}
               <button onClick={() => api.put(`/persatuan/inventory/items/${i.id}`, { ...i, active: !i.active }).then(reload).catch(fail)}>{i.active ? "Henti" : "Aktif"}</button>
             </span>
           </div>

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, fmtDate } from "../api.js";
+import { imgUrl } from "../formapi.js";
 
 const initials = (n) => n.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join("").toUpperCase();
 
@@ -17,7 +18,11 @@ export function ProfilSaya({ user }) {
   return (
     <div>
       <div className="fr-profile">
-        <span className="fr-av big">{initials(user.name)}</span>
+        {user.avatar ? (
+          <img src={imgUrl(user.avatar)} className="fr-av big" alt={user.name} style={{ objectFit: "cover" }} />
+        ) : (
+          <span className="fr-av big">{initials(user.name)}</span>
+        )}
         <div>
           <b>{user.name}</b>
           <small>No. ahli {p?.member_no || user.member_no}</small>

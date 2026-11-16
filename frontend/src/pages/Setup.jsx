@@ -1,8 +1,8 @@
-import { useEffect, useState } from "react";
-import { api } from "../api.js";
+import { useEffect, useState, useRef } from "react";
+import { api, auth } from "../api.js";
 import PasswordInput from "../components/PasswordInput.jsx";
 import { ThemeSwitch } from "../components/Theme.jsx";
-import { useRef } from "react";
+import { imgUrl } from "../formapi.js";
 
 function PasswordBox() {
   const [f, setF] = useState({ current_password: "", new_password: "" });
@@ -26,6 +26,85 @@ function PasswordBox() {
     </section>
   );
 }
+
+function AvatarBox({ profile, onChange }) {
+  const fileRef = useRef(null);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+
+  const onUpload = async (e) => {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    setBusy(true);
+    setMsg("");
+    try {
+      const r = await api.upload("/profile/avatar", f);
+      const updated = { ...profile, avatar: r.avatar };
+      onChange(updated);
+      const cur = auth.get();
+      if (cur) auth.set({ ...cur, user: { ...cur.user, avatar: r.avatar } });
+      setMsg("Gambar profil dikemas kini ✅");
+    } catch (err) {
+      setMsg("Ralat: " + err.message);
+    } finally {
+      setBusy(false);
+      if (fileRef.current) fileRef.current.value = "";
+    }
+  };
+
+  const onDelete = async () => {
+    if (!confirm("Padam gambar profil anda?")) return;
+    setBusy(true);
+    try {
+      await api.del("/profile/avatar");
+      const updated = { ...profile, avatar: null };
+      onChange(updated);
+      const cur = auth.get();
+      if (cur) auth.set({ ...cur, user: { ...cur.user, avatar: null } });
+      setMsg("Gambar profil dipadam ✅");
+    } catch (err) {
+      setMsg("Ralat: " + err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const initials = (profile.name || "")
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((w) => w[0])
+    .join("")
+    .toUpperCase();
+
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: "1rem", margin: ".6rem 0 1rem", padding: ".6rem .8rem", background: "rgba(255,255,255,0.04)", borderRadius: 12 }}>
+      {profile.avatar ? (
+        <img src={imgUrl(profile.avatar)} alt="Avatar" style={{ width: 72, height: 72, borderRadius: "50%", objectFit: "cover", border: "2px solid var(--accent, #D4A94E)", flexShrink: 0 }} />
+      ) : (
+        <div style={{ width: 72, height: 72, borderRadius: "50%", background: "var(--primary, #6B1F1F)", color: "var(--accent, #D4A94E)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "1.4rem", fontWeight: "bold", border: "2px solid var(--line)", flexShrink: 0 }}>
+          {initials || "👤"}
+        </div>
+      )}
+      <div>
+        <b className="small" style={{ display: "block", marginBottom: ".3rem" }}>Gambar Profil</b>
+        <input type="file" accept="image/*" ref={fileRef} onChange={onUpload} style={{ display: "none" }} />
+        <div style={{ display: "flex", gap: ".4rem", flexWrap: "wrap" }}>
+          <button type="button" className="btn ghost small" disabled={busy} onClick={() => fileRef.current?.click()}>
+            {busy ? "Memproses…" : "📷 Tukar Gambar"}
+          </button>
+          {profile.avatar && (
+            <button type="button" className="btn ghost danger small" disabled={busy} onClick={onDelete}>
+              Padam
+            </button>
+          )}
+        </div>
+        {msg && <p className="small muted" style={{ margin: ".3rem 0 0" }}>{msg}</p>}
+      </div>
+    </div>
+  );
+}
+
 
 function DocsBox() {
   const [d, setD] = useState(null);
@@ -154,6 +233,7 @@ export default function Setup({ onProfile }) {
 
       <section className="card">
         <h3>Profil</h3>
+        <AvatarBox profile={profile} onChange={setProfile} />
         <input placeholder="Nama penuh" value={profile.name} onChange={(e) => setProfile({ ...profile, name: e.target.value })} required />
         <input placeholder="Nama pendek (dilihat ahli & prebet lain)" maxLength={40} value={profile.short_name || ""} onChange={(e) => setProfile({ ...profile, short_name: e.target.value })} required />
         <input value={profile.phone} type="tel" onChange={(e) => setProfile({ ...profile, phone: e.target.value })} required />

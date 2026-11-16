@@ -106,6 +106,7 @@ class Item(Base):
     category: Mapped[str] = mapped_column(String(60), default="")
     total: Mapped[int] = mapped_column(Integer, default=1)
     note: Mapped[str] = mapped_column(String(300), default="")
+    image: Mapped[str | None] = mapped_column(String(255))
     active: Mapped[bool] = mapped_column(Boolean, default=True)
 
 

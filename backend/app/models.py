@@ -123,6 +123,7 @@ class User(Base):
     gender_request: Mapped[str] = mapped_column(String(10), default="")
     # Ahli (ada kenderaan) mohon jadi prebet: menunggu kelulusan BKK
     prebet_request: Mapped[bool] = mapped_column(Boolean, default=False)
+    avatar: Mapped[str | None] = mapped_column(String(255))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 

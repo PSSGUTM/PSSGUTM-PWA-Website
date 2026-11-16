@@ -1,14 +1,15 @@
 from datetime import date
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 
-from .. import models
+from .. import models, storage
 from ..database import get_db
 from ..security import get_current_user
 from ..services import booking as svc
 from .auth import UserOut, clean_phone
+from .bookings import save_upload
 
 router = APIRouter(tags=["member"])
 
@@ -164,6 +165,33 @@ def set_theme(data: ThemeIn, user: models.User = Depends(get_current_user), db: 
     user.theme = data.theme
     db.commit()
     return {"theme": user.theme}
+
+
+@router.post("/profile/avatar")
+async def upload_avatar(file: UploadFile = File(...), user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Muat naik gambar profil ahli."""
+    if user.avatar:
+        try:
+            storage.delete(user.avatar)
+        except Exception:
+            pass
+    name = await save_upload(file, prefix="avatar_", images_only=True)
+    user.avatar = name
+    db.commit()
+    return {"avatar": user.avatar}
+
+
+@router.delete("/profile/avatar")
+def delete_avatar(user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Padam gambar profil ahli."""
+    if user.avatar:
+        try:
+            storage.delete(user.avatar)
+        except Exception:
+            pass
+        user.avatar = None
+        db.commit()
+    return {"ok": True}
 
 
 @router.get("/checkpoints")

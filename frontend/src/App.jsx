@@ -164,8 +164,10 @@ export default function App() {
         <Route path="/mt-biro" element={F("MT dan Biro", <MTBiro />)} />
         <Route path="/pengumuman" element={F("Pengumuman", <NoticeList kind="pengumuman" />)} />
         <Route path="/pengumuman/:id" element={F("Pengumuman", <NoticeDetail kind="pengumuman" />)} />
-        <Route path="/kebajikan" element={F("Kebajikan", <NoticeList kind="kebajikan" />)} />
-        <Route path="/kebajikan/:id" element={F("Kebajikan", <NoticeDetail kind="kebajikan" />)} />
+        <Route path="/news" element={F("News", <NoticeList kind="kebajikan" />)} />
+        <Route path="/news/:id" element={F("News", <NoticeDetail kind="kebajikan" />)} />
+        <Route path="/kebajikan" element={F("News", <NoticeList kind="kebajikan" />)} />
+        <Route path="/kebajikan/:id" element={F("News", <NoticeDetail kind="kebajikan" />)} />
         <Route path="/event" element={F("Event", <NoticeList kind="event" />)} />
         <Route path="/event/:id" element={F("Event", <NoticeDetail kind="event" />)} />
         <Route path="/panduan" element={F("Panduan", <TextPage pageKey="panduan" />)} />

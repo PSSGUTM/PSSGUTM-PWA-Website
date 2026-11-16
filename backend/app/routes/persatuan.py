@@ -220,20 +220,83 @@ def broadcast_member_no_verification_notice(db: Session) -> None:
         db.rollback()
 
 
-def fix_known_member_number_issues(db: Session) -> None:
-    """Kemas kini pembetulan nombor ahli yang diketahui (cth: Amirul Aiman SG2425024 -> SG2425025)."""
+def heal_all_swapped_members(db: Session) -> None:
+    """1. Selaraskan sesi tidak sah 2626 -> 2627
+    2. Selaraskan data Amirul Aiman (SG2425025) & Aliuddin (SG2425024)
+    3. Selaraskan nama semua User berdaftar ke rekod Person yang sepadan"""
+    from sqlalchemy import or_
     try:
-        amirul = db.query(Person).filter(func.lower(Person.email) == "amirul-05@graduate.utm.my").first()
-        if amirul and amirul.member_no == "SG2425024":
-            old_mno = amirul.member_no
-            clash = db.query(Person).filter_by(member_no="SG2425025").first()
-            if clash and clash.id != amirul.id and not clash.email:
-                clash.member_no = "SG2425024_old"
-                db.flush()
-            amirul.member_no = "SG2425025"
-            db.flush()
-            sync_person_to_roster(db, amirul, old_mno=old_mno)
-            db.commit()
+        # A. Betulkan sesi 2626 kepada 2627
+        for p in db.query(Person).filter(Person.intake == "2626").all():
+            p.intake = "2627"
+            if p.member_no and p.member_no.startswith("SG2626"):
+                seq = p.member_no[6:] if len(p.member_no) >= 7 else "008"
+                new_mno = f"SG2627{seq}"
+                old_mno = p.member_no
+                p.member_no = new_mno
+                sync_person_to_roster(db, p, old_mno=old_mno)
+
+        for post in db.query(Post).filter(Post.session == "2626").all():
+            post.session = "2627"
+
+        # B. Betulkan kes tertukar Amirul Aiman vs Aliuddin
+        amirul_user = db.query(models.User).filter(func.lower(models.User.email) == "amirul-05@graduate.utm.my").first()
+        if amirul_user:
+            amirul_user.member_no = "SG2425025"
+
+        p25 = db.query(Person).filter_by(member_no="SG2425025").first()
+        p24 = db.query(Person).filter_by(member_no="SG2425024").first()
+        p_amirul = db.query(Person).filter(func.lower(Person.email) == "amirul-05@graduate.utm.my").first()
+
+        target_amirul_p = p_amirul or p25 or p24
+        if target_amirul_p:
+            target_amirul_p.name = amirul_user.name if amirul_user else "MUHAMMAD AMIRUL AIMAN BIN ABDULLAH A24CS0124"
+            target_amirul_p.email = "amirul-05@graduate.utm.my"
+            target_amirul_p.member_no = "SG2425025"
+            target_amirul_p.phone = amirul_user.phone if amirul_user else "0192278390"
+            target_amirul_p.college = "KTC"
+            target_amirul_p.intake = "2425"
+
+            # Pastikan Aliuddin ada rekod Person berasingan dengan SG2425024
+            for other_p in (p24, p25):
+                if other_p and other_p.id != target_amirul_p.id:
+                    if "ALIUDDIN" in (other_p.name or "").upper():
+                        other_p.member_no = "SG2425024"
+                        other_p.name = "MUHAMMAD ALIUDDIN BIN MOHD ANUAR"
+                        if other_p.email == "amirul-05@graduate.utm.my":
+                            other_p.email = "aliuddin@pssgutm.local"
+
+                    # Pindahkan jawatan BKK jika tersangkut pada rekod lain
+                    for post in db.query(Post).filter(Post.person_id == other_p.id, Post.title.like("%Kebajikan dan Kerohanian%")).all():
+                        post.person_id = target_amirul_p.id
+                    # Pindahkan rekod kehadiran jika tersangkut pada rekod lain
+                    for att_rec in db.query(AttendRecord).filter_by(person_id=other_p.id).all():
+                        if not db.query(AttendRecord).filter_by(attendance_id=att_rec.attendance_id, person_id=target_amirul_p.id).first():
+                            att_rec.person_id = target_amirul_p.id
+
+            sync_person_to_roster(db, target_amirul_p, old_mno="SG2425024")
+
+        # C. Selaraskan nama & telefon semua User berdaftar dengan Person mereka
+        for u in db.query(models.User).filter(models.User.role != models.Role.admin).all():
+            u_email = (u.email or "").strip().lower()
+            if not u_email:
+                continue
+            p = db.query(Person).filter(func.lower(Person.email) == u_email).first()
+            if p:
+                if u.name and len(u.name.strip()) > 3 and not u.name.lower().startswith("admin"):
+                    p.name = u.name.strip()
+                if u.phone and not p.phone:
+                    p.phone = u.phone
+                if u.member_no and p.member_no and u.member_no != p.member_no:
+                    u.member_no = p.member_no
+            elif u.member_no:
+                p_mno = db.query(Person).filter_by(member_no=u.member_no).first()
+                if p_mno and p_mno.email.endswith("@pssgutm.local"):
+                    p_mno.email = u_email
+                    if u.name:
+                        p_mno.name = u.name.strip()
+
+        db.commit()
     except Exception:
         db.rollback()
 
@@ -278,9 +341,9 @@ def ensure_seed(db: Session) -> None:
     except Exception:
         db.rollback()
 
-    # 5. Pembetulan nombor ahli yang diketahui (cth: Amirul SG2425024 -> SG2425025)
+    # 5. Selaraskan data ahli tertukar & betulkan sesi tidak sah
     try:
-        fix_known_member_number_issues(db)
+        heal_all_swapped_members(db)
     except Exception:
         db.rollback()
 
@@ -302,6 +365,8 @@ def can(db: Session, user: models.User, flag: str) -> bool:
     if flag == "can_attendance":      # semua pemegang jawatan semasa (jawatankuasa = MT + biro + seki) boleh ambil kehadiran
         return db.query(Post).filter_by(person_id=p.id, session=cur_sess, current=True).first() is not None
     for post in db.query(Post).filter_by(person_id=p.id, session=cur_sess, current=True):
+        if not post.biro_id:  # Majlis Tertinggi (MT) ada akses penuh (kehadiran & inventori)
+            return True
         b = db.get(Biro, post.biro_id) if post.biro_id else None
         while b is not None:
             if getattr(b, flag):
@@ -1156,6 +1221,7 @@ class ItemIn(BaseModel):
     category: str = ""
     total: int = Field(default=1, ge=0, le=100000)
     note: str = Field(default="", max_length=300)
+    image: str = ""
     active: bool = True
 
 
@@ -1168,13 +1234,13 @@ def _out_qty(db, item_id) -> int:
 def items(user: models.User = Depends(need("can_inventory")), db: Session = Depends(get_db)):
     rows = db.query(Item).order_by(func.lower(Item.name)).all()
     return [{"id": i.id, "name": i.name, "category": i.category, "total": i.total, "note": i.note,
-             "active": i.active, "out": _out_qty(db, i.id), "available": i.total - _out_qty(db, i.id)} for i in rows]
+             "image": i.image or "", "active": i.active, "out": _out_qty(db, i.id), "available": i.total - _out_qty(db, i.id)} for i in rows]
 
 
 @router.post("/inventory/items")
 def add_item(data: ItemIn, user: models.User = Depends(need("can_inventory")), db: Session = Depends(get_db)):
     i = Item(name=data.name.strip(), category=data.category.strip(), total=data.total, note=data.note.strip(),
-             active=data.active)
+             image=data.image.strip() if data.image else None, active=data.active)
     db.add(i)
     db.commit()
     return {"id": i.id}
@@ -1186,7 +1252,40 @@ def edit_item(iid: int, data: ItemIn, user: models.User = Depends(need("can_inve
     if i is None:
         raise HTTPException(404, "Tak jumpa")
     i.name, i.category, i.total, i.note, i.active = data.name.strip(), data.category.strip(), data.total, data.note.strip(), data.active
+    if data.image is not None:
+        i.image = data.image.strip() or None
     db.commit()
+    return {"ok": True}
+
+
+@router.post("/inventory/items/{iid}/image")
+async def upload_item_image(iid: int, file: UploadFile = File(...), user: models.User = Depends(need("can_inventory")), db: Session = Depends(get_db)):
+    """Muat naik gambar barang inventori (pilihan)."""
+    i = db.get(Item, iid)
+    if i is None:
+        raise HTTPException(404, "Barang tak jumpa")
+    if i.image:
+        try:
+            storage.delete(i.image)
+        except Exception:
+            pass
+    name = await save_upload(file, prefix="item_", images_only=True)
+    i.image = name
+    db.commit()
+    return {"image": i.image}
+
+
+@router.delete("/inventory/items/{iid}/image")
+def delete_item_image(iid: int, user: models.User = Depends(need("can_inventory")), db: Session = Depends(get_db)):
+    """Padam gambar barang inventori."""
+    i = db.get(Item, iid)
+    if i and i.image:
+        try:
+            storage.delete(i.image)
+        except Exception:
+            pass
+        i.image = None
+        db.commit()
     return {"ok": True}
 
 
@@ -1315,7 +1414,7 @@ def directory(q: str = "", kind: str = "SG", session: str = "", limit: int = 200
     total = qs.count()
     rows = qs.order_by(func.lower(Person.name)).limit(min(max(limit, 1), 500)).all()
     sessions = [s for (s,) in db.query(Person.intake).filter(Person.active.is_(True), Person.kind == ("SSG" if kind == "SSG" else "SG"))
-                .distinct().all() if s]
+                .distinct().all() if s and is_valid_sg_intake(s)]
     sessions.sort(key=lambda s: pp.session_year(s) if pp.valid_session(s) else 0, reverse=True)
     return {"total": total, "sessions": sessions, "items": [_dir_item(db, p, kind != "SSG") for p in rows]}
 
@@ -1349,5 +1448,43 @@ def structure(session: str = "", user: models.User = Depends(get_current_user), 
 def inventory_list(user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
     """Senarai barang untuk semua ahli (nama, kategori, baki). Pinjaman diurus oleh pengurus inventori."""
     rows = db.query(Item).filter(Item.active.is_(True)).order_by(func.lower(Item.name)).all()
-    return [{"id": i.id, "name": i.name, "category": i.category, "note": i.note,
+    return [{"id": i.id, "name": i.name, "category": i.category, "note": i.note, "image": i.image or "",
              "available": i.total - _out_qty(db, i.id), "total": i.total} for i in rows]
+
+
+# ---------------------------------------------------------------- carta organisasi MT & Biro
+
+@router.get("/org-chart")
+def get_org_chart(db: Session = Depends(get_db)):
+    """Papar gambar carta organisasi jawatankuasa (jika ada)."""
+    val = db.get(models.Setting, "org_chart_file")
+    return {"image": val.value if val and val.value else ""}
+
+
+@router.post("/org-chart", dependencies=[Depends(require_admin)])
+async def upload_org_chart(file: UploadFile = File(...), db: Session = Depends(get_db)):
+    """Muat naik gambar carta hierarki organisasi jawatankuasa."""
+    old = db.get(models.Setting, "org_chart_file")
+    if old and old.value:
+        try:
+            storage.delete(old.value)
+        except Exception:
+            pass
+    name = await save_upload(file, prefix="orgchart_", images_only=True)
+    db.merge(models.Setting(key="org_chart_file", value=name))
+    db.commit()
+    return {"image": name}
+
+
+@router.delete("/org-chart", dependencies=[Depends(require_admin)])
+def delete_org_chart(db: Session = Depends(get_db)):
+    """Padam gambar carta organisasi."""
+    old = db.get(models.Setting, "org_chart_file")
+    if old and old.value:
+        try:
+            storage.delete(old.value)
+        except Exception:
+            pass
+        db.delete(old)
+        db.commit()
+    return {"ok": True}

@@ -18,7 +18,7 @@ def run_migrations():
                       ("licence_file", "VARCHAR(255)"), ("licence_expiry", "DATE"), ("insurance_file", "VARCHAR(255)"),
                       ("passenger_ok", "BOOLEAN DEFAULT FALSE"), ("passenger_request", "BOOLEAN DEFAULT FALSE"),
                       ("theme", "VARCHAR(8) DEFAULT 'auto'"), ("gender_request", "VARCHAR(10) DEFAULT ''"),
-                      ("prebet_request", "BOOLEAN DEFAULT FALSE")):
+                      ("prebet_request", "BOOLEAN DEFAULT FALSE"), ("avatar", "VARCHAR(255)")):
         if name not in ucols:
             with engine.begin() as conn:
                 conn.execute(text(f"ALTER TABLE users ADD COLUMN {name} {ddl}"))
@@ -74,6 +74,9 @@ def run_migrations():
         if name not in ncols:
             with engine.begin() as conn:
                 conn.execute(text(f"ALTER TABLE notifications ADD COLUMN {name} {ddl}"))
+    if "inv_items" in insp.get_table_names() and "image" not in {c["name"] for c in insp.get_columns("inv_items")}:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE inv_items ADD COLUMN image VARCHAR(255)"))
 
 
 def _drop_pickup_unique(insp):

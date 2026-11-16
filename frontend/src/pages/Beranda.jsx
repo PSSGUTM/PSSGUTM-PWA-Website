@@ -95,13 +95,13 @@ export default function Beranda() {
       <section>
         <div className="fr-sec-head">
           <div><h2>{data?.titles?.kebajikan || "News"}</h2><p className="small muted">Terkini</p></div>
-          <Link className="btn ghost" to="/kebajikan">Lihat semua</Link>
+          <Link className="btn ghost" to="/news">Lihat semua</Link>
         </div>
         {wel ? (
-          <Link to={`/kebajikan/${wel.id}`} className="fr-banner" style={wel.image ? { backgroundImage: `linear-gradient(rgba(0,0,0,.35),rgba(0,0,0,.35)),url(${imgUrl(wel.image)})` } : null}>
+          <Link to={`/news/${wel.id}`} className="fr-banner" style={wel.image ? { backgroundImage: `linear-gradient(rgba(0,0,0,.35),rgba(0,0,0,.35)),url(${imgUrl(wel.image)})` } : null}>
             <b>{wel.title}</b>
           </Link>
-        ) : <div className="fr-banner empty">{data ? "Belum ada kempen kebajikan." : ""}</div>}
+        ) : <div className="fr-banner empty">{data ? "Belum ada kandungan." : ""}</div>}
       </section>
     </div>
   );

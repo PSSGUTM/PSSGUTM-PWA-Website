@@ -81,9 +81,16 @@ export function Simpanan() {
       <div className="note small">Untuk meminjam barang, hubungi pengurus inventori persatuan.{canManage && <> <Link to="/persatuan">Urus inventori</Link></>}</div>
       {rows.length === 0 && <p className="muted">Belum ada barang didaftarkan.</p>}
       {rows.map((i) => (
-        <div className="card" key={i.id}>
-          <b>{i.name}</b> {i.category && <span className="chip">{i.category}</span>}<br />
-          <span className="small muted">Ada {i.available} daripada {i.total}{i.note ? ` · ${i.note}` : ""}</span>
+        <div className="card" key={i.id} style={{ display: "flex", gap: ".8rem", alignItems: "center" }}>
+          {i.image ? (
+            <img src={imgUrl(i.image)} alt={i.name} style={{ width: 60, height: 60, borderRadius: 10, objectFit: "cover", flexShrink: 0, border: "1px solid var(--line)" }} />
+          ) : (
+            <div style={{ width: 60, height: 60, borderRadius: 10, background: "rgba(212,169,78,0.1)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "1.5rem", flexShrink: 0 }}>📦</div>
+          )}
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <b>{i.name}</b> {i.category && <span className="chip">{i.category}</span>}<br />
+            <span className="small muted">Ada {i.available} daripada {i.total}{i.note ? ` · ${i.note}` : ""}</span>
+          </div>
         </div>
       ))}
     </div>
