@@ -490,13 +490,13 @@ export function DutyRoster() {
             ))}
           </select>
 
-          {/* Pilihan Dropdown Tahun */}
+          {/* Pilihan Dropdown Tahun (Dinamik mengikut tahun semasa sehingga 10 tahun ke hadapan) */}
           <select
             value={currY}
             onChange={(e) => onYearChange(Number(e.target.value))}
             style={{ width: "auto", minWidth: 95, padding: ".4rem .6rem", fontWeight: 600 }}
           >
-            {[2024, 2025, 2026, 2027, 2028].map((y) => (
+            {Array.from({ length: 15 }, (_, i) => 2024 + i).map((y) => (
               <option key={y} value={y}>{y}</option>
             ))}
           </select>
