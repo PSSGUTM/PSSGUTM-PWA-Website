@@ -20,7 +20,7 @@ KINDS = ("pengumuman", "kebajikan", "event")   # 'kebajikan' ialah bahagian bann
 DEFAULT_TITLES = {"pengumuman": "Pengumuman", "event": "Event", "kebajikan": "News",
                   "sistem": "Sistem & Aplikasi", "jadual": "Jadual Latihan"}
 PATTERNS = ("batik", "kawung", "sisik", "tumpal", "luk", "polos")
-IMG_PREFIXES = ("notice_", "homebg_", "poster_")
+IMG_PREFIXES = ("notice_", "homebg_", "poster_", "orgchart_", "item_", "inv_", "avatar_")
 PAGES = {"panduan": "Panduan", "hubungi": "Hubungi", "sokongan": "Sokongan"}
 DEFAULT_TEXT = {
     "panduan": ("Cara guna PSSGUTM\n\n"

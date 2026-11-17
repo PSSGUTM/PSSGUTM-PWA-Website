@@ -383,36 +383,140 @@ export function Profit() {
 
 /* ---------- Admin bertugas ikut bulan ---------- */
 const WD = ["Isn", "Sel", "Rab", "Kha", "Jum", "Sab", "Aha"];
+const WD_FULL = ["Isnin", "Selasa", "Rabu", "Khamis", "Jumaat", "Sabtu", "Ahad"];
+
 export function DutyRoster() {
   const me = auth.get()?.user;
   const [month, setMonth] = useState(new Date().toISOString().slice(0, 7));
   const [d, load] = useLoad(`/admin/duty?month=${month}`, [month]);
+  const [selectedUid, setSelectedUid] = useState(null);
   const [f, setF] = useState(null);
+
   useEffect(() => {
-    if (d) { const mine = d.admins.find((a) => a.user_id === me?.id); setF(mine ? { weekdays: mine.weekdays, phone: mine.phone || mine.profile_phone || "" } : null); }
-  }, [d]);
+    if (d && d.admins?.length > 0) {
+      const targetUid = selectedUid || me?.id || d.admins[0].user_id;
+      const target = d.admins.find((a) => a.user_id === targetUid) || d.admins[0];
+      setSelectedUid(target.user_id);
+      setF({
+        user_id: target.user_id,
+        name: target.name || target.short_name,
+        weekdays: target.weekdays || [],
+        phone: target.phone || target.profile_phone || "",
+      });
+    }
+  }, [d, selectedUid]);
+
+  const selectAdmin = (a) => {
+    setSelectedUid(a.user_id);
+    setF({
+      user_id: a.user_id,
+      name: a.name || a.short_name,
+      weekdays: a.weekdays || [],
+      phone: a.phone || a.profile_phone || "",
+    });
+  };
+
   const save = (e) => {
     e.preventDefault();
-    api.put("/admin/duty", { month, weekdays: f.weekdays, phone: f.phone }).then(() => { alert("Disimpan"); load(); }).catch(fail);
+    if (!f) return;
+    api.put("/admin/duty", { month, user_id: f.user_id, weekdays: f.weekdays, phone: f.phone })
+      .then(() => { alert(`Jadual bertugas untuk ${f.name} berjaya disimpan.`); load(); })
+      .catch(fail);
   };
-  const tg = (i) => setF({ ...f, weekdays: f.weekdays.includes(i) ? f.weekdays.filter((x) => x !== i) : [...f.weekdays, i] });
+
+  const tg = (i) => setF((prev) => ({
+    ...prev,
+    weekdays: prev.weekdays.includes(i) ? prev.weekdays.filter((x) => x !== i) : [...prev.weekdays, i],
+  }));
+
   if (!d) return null;
+
   return (
-    <section className="card">
-      <h3>🧑‍💼 Admin bertugas</h3>
-      <p className="small muted">Setiap admin pilih hari bertugas dalam bulan itu dan nombor untuk dihubungi (lalai: nombor profil). Prebet/ahli nampak admin bertugas hari itu; jika tiada, nombor pentadbir laman web ({d.site.phone}).</p>
-      <input type="month" value={month} onChange={(e) => setMonth(e.target.value)} />
-      {d.admins.map((a) => (
-        <div className="small" key={a.user_id}><b>{a.short_name}</b>: {a.weekdays.length ? a.weekdays.map((i) => WD[i]).join(", ") : "belum set"} · {a.phone || a.profile_phone}</div>
-      ))}
+    <section className="card" style={{ padding: "1.2rem" }}>
+      <h3 style={{ margin: "0 0 .4rem" }}>🧑‍💼 Pegawai / Admin Bertugas (Duty PIC)</h3>
+
+      <div style={{ background: "rgba(212, 169, 78, 0.08)", border: "1px solid var(--accent, #D4A94E)", borderRadius: 8, padding: ".8rem 1rem", margin: ".6rem 0 1rem", fontSize: ".85rem", lineHeight: 1.5 }}>
+        <b>💡 Apakah fungsi bahagian ini?</b>
+        <p style={{ margin: ".3rem 0 0" }}>
+          Pada hari latihan (biasanya <b>Rabu</b> &amp; <b>Sabtu</b>), pemandu Prebet atau ahli penumpang mungkin menghadapi kesulitan (cth: tayar pancit, tersangkut jem, perlu pertukaran penumpang saat akhir).
+        </p>
+        <p style={{ margin: ".3rem 0 0" }}>
+          Admin yang ditandakan bertugas pada hari tersebut akan <b>dipaparkan nama &amp; WhatsApp/panggilannya</b> di halaman Prebet dan Pengangkutan sebagai <i>Pegawai Bertugas Hari Ini</i>.
+        </p>
+        <p style={{ margin: ".3rem 0 0", color: "var(--muted)" }}>
+          <i>Jika tiada admin ditetapkan untuk sesuatu hari, sistem automatik guna nombor umum persatuan ({d.site.phone || "tiada"}).</i>
+        </p>
+      </div>
+
+      <div style={{ display: "flex", alignItems: "center", gap: ".6rem", marginBottom: "1rem" }}>
+        <label className="small" style={{ fontWeight: "bold" }}>Pilih Bulan Bertugas:</label>
+        <input type="month" value={month} onChange={(e) => setMonth(e.target.value)} style={{ padding: ".3rem .6rem" }} />
+      </div>
+
+      <h4 className="small" style={{ margin: "1rem 0 .4rem", color: "var(--accent)" }}>Senarai Admin &amp; Hari Bertugas ({month}):</h4>
+      <div style={{ display: "flex", flexDirection: "column", gap: ".4rem", marginBottom: "1.2rem" }}>
+        {d.admins.map((a) => {
+          const isSelected = selectedUid === a.user_id;
+          return (
+            <div
+              key={a.user_id}
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                padding: ".5rem .8rem",
+                borderRadius: 6,
+                border: isSelected ? "1px solid var(--accent, #D4A94E)" : "1px solid var(--line, #eee)",
+                background: isSelected ? "rgba(212, 169, 78, 0.06)" : "transparent",
+              }}
+            >
+              <div>
+                <b>{a.name || a.short_name}</b> {a.user_id === me?.id && <span style={{ fontSize: ".7rem", padding: "1px 5px", background: "var(--accent)", color: "#fff", borderRadius: 4 }}>Anda</span>}
+                <div className="small muted">
+                  Hari: {a.weekdays.length ? a.weekdays.map((i) => WD_FULL[i]).join(", ") : "Belum ditetapkan"} · No: {a.phone || a.profile_phone || "Tiada no telefon"}
+                </div>
+              </div>
+              <button
+                type="button"
+                className="btn small ghost"
+                onClick={() => selectAdmin(a)}
+                style={{ marginLeft: ".5rem" }}
+              >
+                {isSelected ? "Sedang Diedit" : "Ubah"}
+              </button>
+            </div>
+          );
+        })}
+      </div>
+
       {f && (
-        <form onSubmit={save}>
-          <b className="small">Tetapan saya ({month})</b>
-          <div className="chips" style={{ flexWrap: "wrap" }}>
-            {WD.map((l, i) => <label key={i} className="check small"><input type="checkbox" checked={f.weekdays.includes(i)} onChange={() => tg(i)} />{l}</label>)}
+        <form onSubmit={save} style={{ background: "var(--card-subtle, #f9f9f9)", padding: "1rem", borderRadius: 8, border: "1px solid var(--line, #ddd)" }}>
+          <b className="small">Kemas Kini Jadual: {f.name} ({month})</b>
+          <p className="small muted" style={{ margin: ".2rem 0 .6rem" }}>
+            Tandakan hari-hari yang admin ini bersedia menjadi PIC perhubungan (disyorkan tandakan sekurang-kurangnya <b>Rabu</b> atau <b>Sabtu</b> untuk hari latihan):
+          </p>
+          <div className="chips" style={{ display: "flex", flexWrap: "wrap", gap: ".4rem", margin: ".5rem 0" }}>
+            {WD_FULL.map((label, i) => (
+              <label key={i} className={`check small ${f.weekdays.includes(i) ? "active" : ""}`} style={{ padding: ".4rem .8rem", border: "1px solid var(--line, #ccc)", borderRadius: 6, cursor: "pointer", background: f.weekdays.includes(i) ? "var(--accent, #D4A94E)" : "transparent", color: f.weekdays.includes(i) ? "#fff" : "inherit" }}>
+                <input type="checkbox" checked={f.weekdays.includes(i)} onChange={() => tg(i)} style={{ display: "none" }} />
+                {label} {i === 2 || i === 5 ? "🥋" : ""}
+              </label>
+            ))}
           </div>
-          <input placeholder="No. untuk dihubungi" value={f.phone} onChange={(e) => setF({ ...f, phone: e.target.value })} />
-          <button className="btn">Simpan</button>
+
+          <div style={{ marginTop: ".8rem" }}>
+            <label className="small muted">Nombor WhatsApp / Telefon untuk dipaparkan kepada ahli/prebet:</label>
+            <input
+              placeholder="Contoh: 0192278390"
+              value={f.phone}
+              onChange={(e) => setF({ ...f, phone: e.target.value })}
+              style={{ width: "100%", marginTop: ".2rem" }}
+            />
+          </div>
+
+          <div style={{ marginTop: "1rem" }}>
+            <button className="btn" type="submit">💾 Simpan Jadual Bertugas</button>
+          </div>
         </form>
       )}
     </section>
