@@ -457,12 +457,12 @@ export function DutyRoster() {
       <h3 style={{ margin: "0 0 .4rem", color: "var(--text)" }}>🧑‍💼 Pegawai / Admin Bertugas (Duty PIC)</h3>
 
       <div style={{ background: "rgba(212, 169, 78, 0.12)", border: "1px solid var(--accent, #D4A94E)", borderRadius: 10, padding: ".85rem 1rem", margin: ".8rem 0 1.2rem", fontSize: ".88rem", lineHeight: 1.55, color: "var(--text)" }}>
-        <b style={{ color: "var(--accent)" }}>💡 Apakah fungsi bahagian ini?</b>
+        <b style={{ color: "var(--accent)" }}>💡 Panduan Admin Bertugas &amp; Pengurusan Transport</b>
         <p style={{ margin: ".3rem 0 0" }}>
-          Pada hari latihan (biasanya <b>Rabu</b> &amp; <b>Sabtu</b>), pemandu Prebet atau ahli penumpang mungkin menghadapi kesulitan (cth: tayar pancit, tersangkut jem, perlu pertukaran penumpang saat akhir).
+          <b>Siapa yang menguruskan Transport?</b> Urusan pengangkutan ahli (carpool &amp; prebet) berada di bawah bidang kuasa <b>Biro Kebajikan &amp; Kerohanian (BKK)</b> bersama <b>Majlis Tertinggi (MT)</b>.
         </p>
         <p style={{ margin: ".3rem 0 0" }}>
-          Admin yang ditandakan bertugas pada hari tersebut akan <b>dipaparkan nama &amp; WhatsApp/panggilannya</b> di halaman Prebet dan Pengangkutan sebagai <i>Pegawai Bertugas Hari Ini</i>.
+          Semua admin dalam senarai ini ada akses pengurusan, tetapi jadual bertugas ini menetapkan <b>siapa PIC yang bertugas pada hari latihan</b> (terutamanya <b>Rabu</b> &amp; <b>Sabtu</b>) supaya ahli atau pemandu prebet dapat terus menghubungi PIC tersebut jika berlaku sebarang kesulitan kecemasan.
         </p>
         <p style={{ margin: ".3rem 0 0", color: "var(--muted)" }}>
           <i>Jika tiada admin ditetapkan untuk sesuatu hari, sistem automatik guna nombor umum persatuan ({d.site.phone || "tiada"}).</i>
@@ -528,7 +528,12 @@ export function DutyRoster() {
             >
               <div>
                 <b style={{ color: "var(--text)" }}>{a.name || a.short_name}</b> {a.user_id === me?.id && <span style={{ fontSize: ".7rem", padding: "2px 6px", background: "var(--accent)", color: "#170f0e", fontWeight: "bold", borderRadius: 4, marginLeft: ".3rem" }}>Anda</span>}
-                <div className="small muted" style={{ marginTop: ".15rem" }}>
+                {a.post && (
+                  <span style={{ fontSize: ".75rem", padding: "2px 7px", borderRadius: 4, background: "rgba(212, 169, 78, 0.15)", color: "var(--accent)", marginLeft: ".4rem", fontWeight: 600 }}>
+                    {a.post}
+                  </span>
+                )}
+                <div className="small muted" style={{ marginTop: ".25rem" }}>
                   Hari: {a.weekdays.length ? a.weekdays.map((i) => WD_FULL[i]).join(", ") : "Belum ditetapkan"} · No: {a.phone || a.profile_phone || "Tiada no telefon"}
                 </div>
               </div>
@@ -558,11 +563,12 @@ export function DutyRoster() {
             {WD_FULL.map((label, i) => {
               const active = f.weekdays.includes(i);
               return (
-                <label
+                <button
+                  type="button"
                   key={i}
                   onClick={() => tg(i)}
                   style={{
-                    padding: ".5rem .85rem",
+                    padding: ".55rem .95rem",
                     borderRadius: 8,
                     cursor: "pointer",
                     userSelect: "none",
@@ -572,13 +578,13 @@ export function DutyRoster() {
                     color: active ? "#170f0e" : "var(--text)",
                     display: "inline-flex",
                     alignItems: "center",
-                    gap: ".3rem",
+                    gap: ".35rem",
                     transition: "all .15s ease",
                   }}
                 >
-                  <input type="checkbox" checked={active} onChange={() => {}} style={{ display: "none" }} />
+                  <span>{active ? "☑" : "☐"}</span>
                   {label} {i === 2 || i === 5 ? "🥋" : ""}
-                </label>
+                </button>
               );
             })}
           </div>

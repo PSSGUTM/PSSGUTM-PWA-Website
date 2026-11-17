@@ -1927,11 +1927,40 @@ def list_duty(month: str | None = None, db: Session = Depends(get_db)):
     month = month or svc.today_my().strftime("%Y-%m")
     rows = {r.user_id: r for r in db.query(models.AdminDuty).filter_by(month=month)}
     out = []
+    from ..models_main import Person, Post, Biro
+    from .persatuan import person_of
+    from ..services import people as pp
+
+    cur_sess = pp.session_now(db, svc.today_my())
+
     for a in db.query(models.User).filter_by(role=Role.admin, active=True).order_by(models.User.name):
         r = rows.get(a.id)
-        out.append({"user_id": a.id, "name": a.name, "short_name": svc.short(a), "profile_phone": a.phone,
-                    "weekdays": [int(x) for x in r.weekdays.split(",") if x] if r else [],
-                    "phone": (r.phone if r and r.phone else ""), "set": r is not None})
+        post_str = ""
+        try:
+            p = person_of(db, a)
+            if p:
+                posts = db.query(Post).filter_by(person_id=p.id, session=cur_sess, current=True).all()
+                if not posts:
+                    posts = db.query(Post).filter_by(person_id=p.id, current=True).all()
+                titles = []
+                for pt in posts:
+                    b = db.get(Biro, pt.biro_id) if pt.biro_id else None
+                    b_name = b.code if b and b.code else (b.name if b else "MT")
+                    titles.append(f"{b_name} ({pt.title})")
+                post_str = ", ".join(titles)
+        except Exception:
+            pass
+
+        out.append({
+            "user_id": a.id,
+            "name": a.name,
+            "short_name": svc.short(a),
+            "profile_phone": a.phone,
+            "post": post_str or "Pentadbir Sistem",
+            "weekdays": [int(x) for x in r.weekdays.split(",") if x] if r else [],
+            "phone": (r.phone if r and r.phone else ""),
+            "set": r is not None,
+        })
     return {"month": month, "admins": out, "site": {"name": config.SITE_CONTACT_NAME, "phone": config.SITE_CONTACT_PHONE}}
 
 
