@@ -384,6 +384,10 @@ export function Profit() {
 /* ---------- Admin bertugas ikut bulan ---------- */
 const WD = ["Isn", "Sel", "Rab", "Kha", "Jum", "Sab", "Aha"];
 const WD_FULL = ["Isnin", "Selasa", "Rabu", "Khamis", "Jumaat", "Sabtu", "Ahad"];
+const MONTHS_MY = [
+  "Januari", "Februari", "Mac", "April", "Mei", "Jun",
+  "Julai", "Ogos", "September", "Oktober", "November", "Disember",
+];
 
 export function DutyRoster() {
   const me = auth.get()?.user;
@@ -391,6 +395,23 @@ export function DutyRoster() {
   const [d, load] = useLoad(`/admin/duty?month=${month}`, [month]);
   const [selectedUid, setSelectedUid] = useState(null);
   const [f, setF] = useState(null);
+
+  const [currY, currM] = month.split("-").map(Number);
+
+  const shiftMonth = (delta) => {
+    const dt = new Date(currY, currM - 1 + delta, 1);
+    const newY = dt.getFullYear();
+    const newM = String(dt.getMonth() + 1).padStart(2, "0");
+    setMonth(`${newY}-${newM}`);
+  };
+
+  const onMonthChange = (mIdx) => {
+    setMonth(`${currY}-${String(mIdx).padStart(2, "0")}`);
+  };
+
+  const onYearChange = (y) => {
+    setMonth(`${y}-${String(currM).padStart(2, "0")}`);
+  };
 
   useEffect(() => {
     if (d && d.admins?.length > 0) {
@@ -433,10 +454,10 @@ export function DutyRoster() {
 
   return (
     <section className="card" style={{ padding: "1.2rem" }}>
-      <h3 style={{ margin: "0 0 .4rem" }}>🧑‍💼 Pegawai / Admin Bertugas (Duty PIC)</h3>
+      <h3 style={{ margin: "0 0 .4rem", color: "var(--text)" }}>🧑‍💼 Pegawai / Admin Bertugas (Duty PIC)</h3>
 
-      <div style={{ background: "rgba(212, 169, 78, 0.08)", border: "1px solid var(--accent, #D4A94E)", borderRadius: 8, padding: ".8rem 1rem", margin: ".6rem 0 1rem", fontSize: ".85rem", lineHeight: 1.5 }}>
-        <b>💡 Apakah fungsi bahagian ini?</b>
+      <div style={{ background: "rgba(212, 169, 78, 0.12)", border: "1px solid var(--accent, #D4A94E)", borderRadius: 10, padding: ".85rem 1rem", margin: ".8rem 0 1.2rem", fontSize: ".88rem", lineHeight: 1.55, color: "var(--text)" }}>
+        <b style={{ color: "var(--accent)" }}>💡 Apakah fungsi bahagian ini?</b>
         <p style={{ margin: ".3rem 0 0" }}>
           Pada hari latihan (biasanya <b>Rabu</b> &amp; <b>Sabtu</b>), pemandu Prebet atau ahli penumpang mungkin menghadapi kesulitan (cth: tayar pancit, tersangkut jem, perlu pertukaran penumpang saat akhir).
         </p>
@@ -448,13 +469,48 @@ export function DutyRoster() {
         </p>
       </div>
 
-      <div style={{ display: "flex", alignItems: "center", gap: ".6rem", marginBottom: "1rem" }}>
-        <label className="small" style={{ fontWeight: "bold" }}>Pilih Bulan Bertugas:</label>
-        <input type="month" value={month} onChange={(e) => setMonth(e.target.value)} style={{ padding: ".3rem .6rem" }} />
+      {/* Pemilih Bulan Interaktif */}
+      <div style={{ background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 12, padding: "1rem", marginBottom: "1.2rem" }}>
+        <label className="small" style={{ fontWeight: "bold", display: "block", marginBottom: ".6rem", color: "var(--text)" }}>
+          📅 Bulan Bertugas:
+        </label>
+        <div style={{ display: "flex", alignItems: "center", gap: ".5rem", flexWrap: "wrap" }}>
+          <button type="button" className="btn small ghost" onClick={() => shiftMonth(-1)} title="Bulan Sebelum">
+            ◀ Sebelum
+          </button>
+
+          {/* Pilihan Dropdown Bulan */}
+          <select
+            value={currM}
+            onChange={(e) => onMonthChange(Number(e.target.value))}
+            style={{ width: "auto", minWidth: 130, padding: ".4rem .6rem", fontWeight: 600 }}
+          >
+            {MONTHS_MY.map((nm, idx) => (
+              <option key={idx + 1} value={idx + 1}>{nm}</option>
+            ))}
+          </select>
+
+          {/* Pilihan Dropdown Tahun */}
+          <select
+            value={currY}
+            onChange={(e) => onYearChange(Number(e.target.value))}
+            style={{ width: "auto", minWidth: 95, padding: ".4rem .6rem", fontWeight: 600 }}
+          >
+            {[2024, 2025, 2026, 2027, 2028].map((y) => (
+              <option key={y} value={y}>{y}</option>
+            ))}
+          </select>
+
+          <button type="button" className="btn small ghost" onClick={() => shiftMonth(1)} title="Bulan Seterusnya">
+            Seterusnya ▶
+          </button>
+        </div>
       </div>
 
-      <h4 className="small" style={{ margin: "1rem 0 .4rem", color: "var(--accent)" }}>Senarai Admin &amp; Hari Bertugas ({month}):</h4>
-      <div style={{ display: "flex", flexDirection: "column", gap: ".4rem", marginBottom: "1.2rem" }}>
+      <h4 className="small" style={{ margin: "1rem 0 .5rem", color: "var(--accent)" }}>
+        Senarai Admin &amp; Hari Bertugas ({MONTHS_MY[currM - 1]} {currY}):
+      </h4>
+      <div style={{ display: "flex", flexDirection: "column", gap: ".5rem", marginBottom: "1.2rem" }}>
         {d.admins.map((a) => {
           const isSelected = selectedUid === a.user_id;
           return (
@@ -464,15 +520,15 @@ export function DutyRoster() {
                 display: "flex",
                 justifyContent: "space-between",
                 alignItems: "center",
-                padding: ".5rem .8rem",
-                borderRadius: 6,
-                border: isSelected ? "1px solid var(--accent, #D4A94E)" : "1px solid var(--line, #eee)",
-                background: isSelected ? "rgba(212, 169, 78, 0.06)" : "transparent",
+                padding: ".6rem .9rem",
+                borderRadius: 10,
+                border: isSelected ? "2px solid var(--accent, #D4A94E)" : "1px solid var(--line)",
+                background: isSelected ? "rgba(212, 169, 78, 0.12)" : "var(--surface)",
               }}
             >
               <div>
-                <b>{a.name || a.short_name}</b> {a.user_id === me?.id && <span style={{ fontSize: ".7rem", padding: "1px 5px", background: "var(--accent)", color: "#fff", borderRadius: 4 }}>Anda</span>}
-                <div className="small muted">
+                <b style={{ color: "var(--text)" }}>{a.name || a.short_name}</b> {a.user_id === me?.id && <span style={{ fontSize: ".7rem", padding: "2px 6px", background: "var(--accent)", color: "#170f0e", fontWeight: "bold", borderRadius: 4, marginLeft: ".3rem" }}>Anda</span>}
+                <div className="small muted" style={{ marginTop: ".15rem" }}>
                   Hari: {a.weekdays.length ? a.weekdays.map((i) => WD_FULL[i]).join(", ") : "Belum ditetapkan"} · No: {a.phone || a.profile_phone || "Tiada no telefon"}
                 </div>
               </div>
@@ -480,7 +536,7 @@ export function DutyRoster() {
                 type="button"
                 className="btn small ghost"
                 onClick={() => selectAdmin(a)}
-                style={{ marginLeft: ".5rem" }}
+                style={{ marginLeft: ".5rem", whiteSpace: "nowrap" }}
               >
                 {isSelected ? "Sedang Diedit" : "Ubah"}
               </button>
@@ -490,31 +546,55 @@ export function DutyRoster() {
       </div>
 
       {f && (
-        <form onSubmit={save} style={{ background: "var(--card-subtle, #f9f9f9)", padding: "1rem", borderRadius: 8, border: "1px solid var(--line, #ddd)" }}>
-          <b className="small">Kemas Kini Jadual: {f.name} ({month})</b>
-          <p className="small muted" style={{ margin: ".2rem 0 .6rem" }}>
+        <form onSubmit={save} style={{ background: "var(--surface)", padding: "1.1rem", borderRadius: 12, border: "1px solid var(--line)" }}>
+          <b className="small" style={{ fontSize: ".95rem", color: "var(--text)" }}>
+            Kemas Kini Jadual: <span style={{ color: "var(--accent)" }}>{f.name}</span> ({MONTHS_MY[currM - 1]} {currY})
+          </b>
+          <p className="small muted" style={{ margin: ".3rem 0 .8rem", lineHeight: 1.45 }}>
             Tandakan hari-hari yang admin ini bersedia menjadi PIC perhubungan (disyorkan tandakan sekurang-kurangnya <b>Rabu</b> atau <b>Sabtu</b> untuk hari latihan):
           </p>
-          <div className="chips" style={{ display: "flex", flexWrap: "wrap", gap: ".4rem", margin: ".5rem 0" }}>
-            {WD_FULL.map((label, i) => (
-              <label key={i} className={`check small ${f.weekdays.includes(i) ? "active" : ""}`} style={{ padding: ".4rem .8rem", border: "1px solid var(--line, #ccc)", borderRadius: 6, cursor: "pointer", background: f.weekdays.includes(i) ? "var(--accent, #D4A94E)" : "transparent", color: f.weekdays.includes(i) ? "#fff" : "inherit" }}>
-                <input type="checkbox" checked={f.weekdays.includes(i)} onChange={() => tg(i)} style={{ display: "none" }} />
-                {label} {i === 2 || i === 5 ? "🥋" : ""}
-              </label>
-            ))}
+
+          <div style={{ display: "flex", flexWrap: "wrap", gap: ".5rem", margin: ".6rem 0 1rem" }}>
+            {WD_FULL.map((label, i) => {
+              const active = f.weekdays.includes(i);
+              return (
+                <label
+                  key={i}
+                  onClick={() => tg(i)}
+                  style={{
+                    padding: ".5rem .85rem",
+                    borderRadius: 8,
+                    cursor: "pointer",
+                    userSelect: "none",
+                    fontWeight: active ? 700 : 500,
+                    border: active ? "1.5px solid var(--accent, #D4A94E)" : "1px solid var(--line)",
+                    background: active ? "var(--accent, #D4A94E)" : "var(--bg)",
+                    color: active ? "#170f0e" : "var(--text)",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: ".3rem",
+                    transition: "all .15s ease",
+                  }}
+                >
+                  <input type="checkbox" checked={active} onChange={() => {}} style={{ display: "none" }} />
+                  {label} {i === 2 || i === 5 ? "🥋" : ""}
+                </label>
+              );
+            })}
           </div>
 
-          <div style={{ marginTop: ".8rem" }}>
-            <label className="small muted">Nombor WhatsApp / Telefon untuk dipaparkan kepada ahli/prebet:</label>
+          <div style={{ marginTop: "1rem" }}>
+            <label className="small muted" style={{ display: "block", marginBottom: ".3rem" }}>
+              Nombor WhatsApp / Telefon untuk dipaparkan kepada ahli/prebet:
+            </label>
             <input
               placeholder="Contoh: 0192278390"
               value={f.phone}
               onChange={(e) => setF({ ...f, phone: e.target.value })}
-              style={{ width: "100%", marginTop: ".2rem" }}
             />
           </div>
 
-          <div style={{ marginTop: "1rem" }}>
+          <div style={{ marginTop: "1.2rem" }}>
             <button className="btn" type="submit">💾 Simpan Jadual Bertugas</button>
           </div>
         </form>
