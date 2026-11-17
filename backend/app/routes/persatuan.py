@@ -394,17 +394,24 @@ def sync_canonical_roster_and_dedup(db: Session) -> None:
                 else:
                     att_rec.person_id = p25.id
 
-        # E. Selaraskan User berdaftar ke Person kanonikal
+        # E. Selaraskan User berdaftar ke Person kanonikal (termasuk nama)
         for u in db.query(models.User).filter(models.User.role != models.Role.admin).all():
             u_email = (u.email or "").strip().lower()
             if not u_email:
                 continue
             p = db.query(Person).filter(func.lower(Person.email) == u_email).first()
+            if not p and u.member_no:
+                p = db.query(Person).filter_by(member_no=u.member_no).first()
             if p:
+                # Kemaskini nama User supaya ikut nama kanonikal (buang matric number dll)
+                if p.name and p.name.strip() and u.name != p.name:
+                    u.name = p.name
                 if u.member_no and p.member_no and u.member_no != p.member_no:
                     u.member_no = p.member_no
                 if u.phone and not p.phone:
                     p.phone = u.phone
+                if not p.email or p.email.endswith("@pssgutm.local"):
+                    p.email = u_email
             elif u.member_no:
                 p_mno = db.query(Person).filter_by(member_no=u.member_no).first()
                 if p_mno and (p_mno.email.endswith("@pssgutm.local") or not p_mno.email):
