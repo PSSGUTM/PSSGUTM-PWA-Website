@@ -34,7 +34,13 @@ function Manifest({ date, onChange }) {
       {m.cars.map((c) => (
         <div className="note" key={c.vehicle_id} style={{ cursor: "default" }}>
           <b>{c.vehicle_type === "motorcycle" ? "🏍️" : "🚗"} {c.name}</b> {c.plate_no} · {c.passengers.length}/{c.capacity} ({c.male}L {c.female}P)
-          {c.driver && <span className="small"> · {c.driver.name} ({c.driver_college || "-"}{c.category ? `, kolej ${c.category}` : ""}) <a href={`tel:${c.driver.phone}`}>{c.driver.phone}</a></span>}
+          {c.driver && (
+            <span className="small">
+              {" "}· {c.driver.name}
+              {c.driver.is_borrowed ? <span style={{ color: "var(--accent, #D4A94E)", fontWeight: 600 }}> (pinjam kereta {c.driver.owner_name})</span> : ""}
+              {" "}({c.driver_college || "-"}{c.category ? `, kolej ${c.category}` : ""}) <a href={`tel:${c.driver.phone}`}>{c.driver.phone}</a>
+            </span>
+          )}
           <div className="small">{c.desc}</div>
           {c.passengers.map((p) => (
             <div className="small" key={p.user_id}>{p.full_name || p.name} <span className="muted">({p.short_name})</span> ({p.college}) · 📍 {p.checkpoint}{p.block ? ` · blok ${p.block}` : ""} · {p.directions.map((d) => DIR[d]).join("+")} · <a href={`tel:${p.phone}`}>{p.phone}</a></div>

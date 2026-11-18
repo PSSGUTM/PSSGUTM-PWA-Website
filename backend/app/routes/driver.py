@@ -377,8 +377,10 @@ class AvailIn(BaseModel):
 
 @router.put("/availability")
 def put_availability(data: AvailIn, user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
-    if db.query(models.Vehicle).filter_by(driver_id=user.id, approval=ApprovalStatus.approved, active=True).first() is None:
-        raise HTTPException(400, "Perlu sekurang-kurangnya satu kenderaan yang diluluskan dahulu")
+    has_own_veh = db.query(models.Vehicle).filter_by(driver_id=user.id, approval=ApprovalStatus.approved, active=True).first() is not None
+    is_driver = user.role in (Role.driver, Role.admin) or has_own_veh
+    if not is_driver:
+        raise HTTPException(400, "Perlu didaftarkan sebagai prebet dahulu")
     try:
         svc.set_availability(db, user, data.training_date, data.available, vehicle_id=data.vehicle_id)
     except ValueError as e:

@@ -1624,13 +1624,14 @@ class AvailOnBehalf(BaseModel):
     user_id: int
     training_date: date
     available: bool
+    vehicle_id: int | None = None
 
 
 @router.put("/prebet/availability")
 def prebet_on_behalf(data: AvailOnBehalf, db: Session = Depends(get_db)):
     u = _get(db, models.User, data.user_id, "Prebet tak jumpa")
     try:
-        svc.set_availability(db, u, data.training_date, data.available, by_admin=True)
+        svc.set_availability(db, u, data.training_date, data.available, by_admin=True, vehicle_id=data.vehicle_id)
     except ValueError as e:
         db.rollback()
         raise HTTPException(400, str(e))

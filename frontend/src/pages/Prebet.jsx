@@ -36,10 +36,34 @@ function DateCard({ o, onSet, onTick, busy, contact }) {
           <button disabled={busy || locked} className={declined ? "on bad" : ""} onClick={() => onSet(o, false)}>Tak boleh</button>
         </div>
       </div>
-      {multi && (
-        <label className="small" style={{ display: "block", marginTop: 6 }}>Kenderaan hari ini
-          <select disabled={busy || locked} value={o.vehicle_id || ""} onChange={(e) => onSet(o, o.available !== false, Number(e.target.value))}>
-            {o.vehicles.map((v) => <option key={v.id} value={v.id}>{v.desc}</option>)}
+      {(o.vehicles || []).length > 0 && (
+        <label className="small" style={{ display: "block", marginTop: 8 }}>
+          <b>Kenderaan hari ini:</b>
+          <select
+            disabled={busy || locked}
+            value={o.vehicle_id || ""}
+            onChange={(e) => onSet(o, o.available !== false, e.target.value ? Number(e.target.value) : null)}
+            style={{ marginTop: 4, width: "100%", padding: ".4rem .6rem", fontWeight: 500 }}
+          >
+            <option value="">-- Pilih Kenderaan (Sendiri / Pinjam) --</option>
+            {o.vehicles.filter((v) => v.is_mine).length > 0 && (
+              <optgroup label="🚗 Kenderaan Milik Sendiri">
+                {o.vehicles.filter((v) => v.is_mine).map((v) => (
+                  <option key={v.id} value={v.id}>
+                    {v.name} ({v.plate_no}) — Milik Saya
+                  </option>
+                ))}
+              </optgroup>
+            )}
+            {o.vehicles.filter((v) => !v.is_mine).length > 0 && (
+              <optgroup label="🤝 Kenderaan Pinjam (Prebet Lain)">
+                {o.vehicles.filter((v) => !v.is_mine).map((v) => (
+                  <option key={v.id} value={v.id}>
+                    {v.name} ({v.plate_no}) — Pinjam daripada {v.owner_name || "Prebet"}
+                  </option>
+                ))}
+              </optgroup>
+            )}
           </select>
         </label>
       )}
@@ -49,6 +73,11 @@ function DateCard({ o, onSet, onTick, busy, contact }) {
       {o.passengers > 0 && (
         <div className="note" style={{ cursor: "default" }}>
           <b>🚗 Tugasan anda: {o.passengers} penumpang</b>
+          {o.vehicle_name && (
+            <div className="small" style={{ color: "var(--accent)", fontWeight: 600, marginTop: 2 }}>
+              Kenderaan: {o.vehicle_name} {o.is_borrowed ? `(🤝 Pinjam daripada ${o.owner_name})` : "(Milik Sendiri)"}
+            </div>
+          )}
           <div className="chiprow">
             {o.stops.map((st) => <span className="chip" key={st.college + st.checkpoint}>📍 {st.college} · {st.checkpoint} ({st.count})</span>)}
           </div>
@@ -111,7 +140,7 @@ export default function Prebet({ user }) {
     } catch (e) { toast(e.message, "bad"); } finally { setBusy(false); }
   }
 
-  const approved = veh?.vehicles.some((v) => v.approval === "approved" && v.active);
+  const approved = veh?.vehicles.some((v) => v.approval === "approved" && v.active) || user?.role === "driver" || user?.role === "admin";
   const coming = dates ? dates.filter((d) => !d.past) : null;
   const next = coming && (coming.find((d) => d.passengers > 0) || coming.find((d) => d.available === true));
   const left = next ? Math.round((new Date(next.training_date + "T00:00:00") - new Date(new Date().toDateString())) / 864e5) : null;
@@ -137,6 +166,11 @@ export default function Prebet({ user }) {
 
       {docs && !docs.has_licence && <div className="note warnbox"><b>⚠️ Gambar lesen belum dimuat naik.</b> <Link to="/profil">Lengkapkan di Profil →</Link></div>}
       {veh && !approved && <div className="note warnbox"><b>🚗 Belum ada kenderaan yang diluluskan.</b> {veh.vehicles.length ? "Menunggu kelulusan BKK." : <Link to="/driver">Daftar kenderaan →</Link>}</div>}
+      {veh && approved && !veh.vehicles.some((v) => v.approval === "approved" && v.active) && (
+        <div className="note" style={{ borderLeft: "4px solid var(--accent, #D4A94E)", background: "rgba(212,169,78,0.08)" }}>
+          <b>💡 Prebet Kenderaan Pinjam:</b> Anda tidak mempunyai kenderaan sendiri berdaftar, tetapi anda boleh memilih kenderaan pinjam (daripada senarai kenderaan prebet lain) pada mana-mana tarikh latihan di bawah.
+        </div>
+      )}
 
       <Notifications warningsOnly notes={notes} setNotes={setNotes} />
       {err && <p className="error">{err}</p>}

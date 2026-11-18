@@ -710,35 +710,67 @@ def prebet_dates(db: Session, today: date | None = None, days: int | None = None
 
 
 def prebet_options(db: Session, user: models.User) -> list[dict]:
-    """Senarai tarikh untuk prebet: status sahkan, kenderaan dipilih, waktu tutup, tugasan (jika senarai sudah disusun),
+    """Senarai tarikh untuk prebet: status sahkan, kenderaan dipilih (milik sendiri atau pinjam), waktu tutup, tugasan,
     senarai penumpang untuk diambil, dan tanda dah sampai / dah hantar."""
     rows = {r.training_date: r for r in db.query(models.PrebetAvailability).filter_by(user_id=user.id)}
     mine = prebet_vehicles(db, user.id)
-    my_veh = {v.id for v in db.query(models.Vehicle).filter_by(driver_id=user.id)}
+    my_veh = {v.id for v in mine}
+
+    # Semua kenderaan aktif & diluluskan dalam sistem untuk pilihan kenderaan sendiri & pinjam
+    all_approved = db.query(models.Vehicle).filter_by(active=True, approval=models.ApprovalStatus.approved).order_by(models.Vehicle.name).all()
+    driver_ids = {v.driver_id for v in all_approved if v.driver_id}
+    drivers_map = {u.id: u for u in db.query(models.User).filter(models.User.id.in_(list(driver_ids) or [0]))}
+
+    vehicles_for_choice = []
+    # 1. Kenderaan milik sendiri
+    for v in mine:
+        card = vehicle_card(v)
+        card["is_mine"] = True
+        card["owner_name"] = short(user)
+        card["label"] = f"{v.name} ({v.plate_no}) — Milik Sendiri"
+        vehicles_for_choice.append(card)
+    # 2. Kenderaan pinjam (daripada prebet lain)
+    for v in all_approved:
+        if v.driver_id != user.id:
+            owner = drivers_map.get(v.driver_id)
+            owner_name = short(owner) if owner else "Prebet Lain"
+            card = vehicle_card(v)
+            card["is_mine"] = False
+            card["owner_name"] = owner_name
+            card["label"] = f"{v.name} ({v.plate_no}) — Pinjam ({owner_name})"
+            vehicles_for_choice.append(card)
+
     now = now_my()
     out = []
     for d, s, ev in prebet_dates(db, keep_recent=True):
         r = rows.get(d)
         dl = _deadline(d, s)
-        pick = next((v for v in mine if r and r.vehicle_id == v.id), mine[0] if mine else None)
+        chosen_vid = r.vehicle_id if (r and r.vehicle_id) else (mine[0].id if mine else None)
+        chosen_v = db.get(models.Vehicle, chosen_vid) if chosen_vid else None
+        is_borrowed = bool(chosen_v and chosen_v.driver_id != user.id)
+        owner_name = short(drivers_map.get(chosen_v.driver_id)) if (is_borrowed and chosen_v and chosen_v.driver_id in drivers_map) else None
+
         item = {"training_date": d.isoformat(), "session_name": s.name, "is_activity": s.one_off_date is not None,
                 "start_time": s.start_time.strftime("%H:%M"), "pickup_window": pickup_window(s),
                 "arrive_by": arrive_by(s),
                 "venue": None, "available": None if r is None else r.available,
                 "by_admin": bool(r and r.by_admin), "deadline": dl.isoformat(),
                 "deadline_passed": now >= dl, "event_status": ev.status.value if ev else "open",
-                "vehicles": [vehicle_card(v) for v in mine], "vehicle_id": pick.id if pick else None,
+                "vehicles": vehicles_for_choice, "vehicle_id": chosen_vid,
+                "vehicle_name": chosen_v.name if chosen_v else None,
+                "is_borrowed": is_borrowed, "owner_name": owner_name,
                 "stops": [], "passengers": 0, "pickups": [], "task": "", "ticks": None,
                 "past": _session_over(d, s, now)}
         if ev is not None and ev.venue_id:
             v = db.get(models.Venue, ev.venue_id)
             item["venue"] = v.name if v else None
         if ev is not None:
+            target_vids = {chosen_vid} if chosen_vid else my_veh
             bks = db.query(models.Booking).filter(
                 models.Booking.training_date == d, models.Booking.session_id == s.id,
-                models.Booking.status == BookingStatus.confirmed, models.Booking.vehicle_id.in_(list(my_veh) or [0])).all()
+                models.Booking.status == BookingStatus.confirmed, models.Booking.vehicle_id.in_(list(target_vids) or [0])).all()
             if bks:
-                m = manifest(db, d, vehicle_ids=my_veh, for_driver=True)
+                m = manifest(db, d, vehicle_ids=target_vids, for_driver=True)
                 stops, pickups = [], []
                 for c in m["cars"]:
                     stops += [{"college": st["college"], "checkpoint": st["checkpoint"], "count": st["count"],
@@ -761,7 +793,7 @@ def prebet_options(db: Session, user: models.User) -> list[dict]:
 
 def set_availability(db: Session, user: models.User, d: date, available: bool, by_admin: bool = False,
                      vehicle_id: int | None = None):
-    """Prebet (atau admin bagi pihak prebet) sahkan boleh/tak boleh bawa pada satu tarikh, dan pilih kenderaan yang digunakan.
+    """Prebet (atau admin bagi pihak prebet) sahkan boleh/tak boleh bawa pada satu tarikh, dan pilih kenderaan yang digunakan (milik sendiri atau pinjam).
     Selepas waktu tutup (lalai 5 petang hari latihan) hanya admin boleh ubah."""
     row_dates = {x[0] for x in prebet_dates(db)}
     if d not in row_dates:
@@ -770,10 +802,13 @@ def set_availability(db: Session, user: models.User, d: date, available: bool, b
         raise ValueError("Tiada latihan pada tarikh ini")
     if not by_admin and member_closed(d):
         raise ValueError(f"Pengesahan ditutup pada {fmt12(_hm(config.CUTOFF_TIME))} hari latihan. Sila hubungi BKK.")
-    mine = prebet_vehicles(db, user.id)
-    if vehicle_id is not None and vehicle_id not in {v.id for v in mine}:
-        raise ValueError("Kenderaan itu bukan milik anda atau belum diluluskan")
+    if vehicle_id is not None:
+        target_v = db.get(models.Vehicle, vehicle_id)
+        if target_v is None or target_v.approval != models.ApprovalStatus.approved or not target_v.active:
+            raise ValueError("Kenderaan itu tidak wujud atau belum diluluskan")
     vids = [v.id for v in db.query(models.Vehicle).filter_by(driver_id=user.id)]
+    if vehicle_id:
+        vids.append(vehicle_id)
     if not available:
         ev = event_on(db, d)
         if ev is not None and ev.status == EventStatus.finalised and vids and db.query(models.Booking).filter(
@@ -785,8 +820,7 @@ def set_availability(db: Session, user: models.User, d: date, available: bool, b
         row = models.PrebetAvailability(user_id=user.id, training_date=d)
         db.add(row)
     row.available, row.by_admin = available, by_admin
-    if vehicle_id is not None:
-        row.vehicle_id = vehicle_id
+    row.vehicle_id = vehicle_id
     db.flush()
     resolve_warning(db, user.id, f"avail:{user.id}:{d.isoformat()}")
     if by_admin:
@@ -894,25 +928,58 @@ def prebet_confirmed_ids(db, d: date) -> set[int]:
     return {r.user_id for r in db.query(models.PrebetAvailability).filter_by(training_date=d, available=True)}
 
 
+def effective_driver(db: Session, v: models.Vehicle, d: date | None = None) -> models.User | None:
+    """Pemandu sebenar pada tarikh latihan: peminjam jika dipinjam pada tarikh d, atau pemilik asal."""
+    if d is not None:
+        r = db.query(models.PrebetAvailability).filter_by(training_date=d, vehicle_id=v.id, available=True).first()
+        if r is not None:
+            u = db.get(models.User, r.user_id)
+            if u is not None:
+                return u
+    return db.get(models.User, v.driver_id) if v.driver_id else None
+
+
 def _vehicles_for(db, d: date):
     """Kenderaan yang boleh disusun pada tarikh ini: diluluskan, aktif, hari tersedia, tak ditandakan tak boleh,
-    dan (jika REQUIRE_PREBET_CONFIRM) pemandunya sudah sahkan 'boleh bawa'.
-    Seorang prebet hanya satu kenderaan setiap tarikh: yang dipilihnya (atau yang pertama jika belum pilih)."""
+    dan dipandu oleh prebet yang sahkan 'boleh bawa' (milik sendiri atau pinjam)."""
     unavailable = {r.vehicle_id for r in db.query(models.VehicleUnavailable).filter_by(training_date=d)}
-    confirmed = prebet_confirmed_ids(db, d) if config.REQUIRE_PREBET_CONFIRM else None
-    chosen = {r.user_id: r.vehicle_id for r in db.query(models.PrebetAvailability).filter_by(training_date=d)}
-    out, by_driver = [], {}
-    for v in db.query(models.Vehicle).filter_by(active=True, approval=models.ApprovalStatus.approved).order_by(models.Vehicle.id):
-        if str(d.weekday()) not in v.available_days.split(",") or v.id in unavailable:
-            continue
-        if confirmed is not None and v.driver_id and v.driver_id not in confirmed:
-            continue
-        if v.driver_id:
-            by_driver.setdefault(v.driver_id, []).append(v)
-        else:
-            out.append(v)
-    for uid, vs in by_driver.items():
-        out.append(next((v for v in vs if chosen.get(uid) == v.id), vs[0]))
+    all_approved = {v.id: v for v in db.query(models.Vehicle).filter_by(active=True, approval=models.ApprovalStatus.approved).all()
+                    if v.id not in unavailable and str(d.weekday()) in v.available_days.split(",")}
+
+    # Prebet-prebet yang sahkan 'boleh bawa' pada tarikh ini
+    avails = db.query(models.PrebetAvailability).filter_by(training_date=d, available=True).all()
+    out = []
+    used_vids = set()
+
+    # 1. Kenderaan yang dipilih prebet (termasuk kereta pinjam)
+    for r in avails:
+        if r.vehicle_id and r.vehicle_id in all_approved and r.vehicle_id not in used_vids:
+            out.append(all_approved[r.vehicle_id])
+            used_vids.add(r.vehicle_id)
+
+    # 2. Prebet yang sahkan 'boleh bawa' tapi belum pilih kenderaan khusus
+    for r in avails:
+        if not r.vehicle_id:
+            mine = [v for v in all_approved.values() if v.driver_id == r.user_id and v.id not in used_vids]
+            if mine:
+                first_v = sorted(mine, key=lambda x: x.id)[0]
+                out.append(first_v)
+                used_vids.add(first_v.id)
+
+    # 3. Jika tak perlukan pengesahan prebet (auto):
+    if not config.REQUIRE_PREBET_CONFIRM:
+        by_driver = defaultdict(list)
+        for v in all_approved.values():
+            if v.id not in used_vids:
+                if v.driver_id:
+                    by_driver[v.driver_id].append(v)
+                else:
+                    out.append(v)
+        for uid, vs in by_driver.items():
+            first_v = sorted(vs, key=lambda x: x.id)[0]
+            out.append(first_v)
+            used_vids.add(first_v.id)
+
     return sorted(out, key=lambda v: v.id)
 
 
@@ -947,8 +1014,10 @@ def _duty_driver_ids(db: Session, d: date) -> dict[int, list[int]]:
     out: dict[int, list[int]] = {}
     for (vid,) in rows:
         v = db.get(models.Vehicle, vid)
-        if v and v.driver_id:
-            out.setdefault(v.driver_id, []).append(vid)
+        if v:
+            drv = effective_driver(db, v, d)
+            if drv:
+                out.setdefault(drv.id, []).append(vid)
     return out
 
 
@@ -1019,20 +1088,20 @@ def payout_category(uids, users: dict, colleges: dict) -> str:
     return "dekat"
 
 
-def vehicle_category(db: Session, v: models.Vehicle, colleges: dict | None = None) -> str | None:
+def vehicle_category(db: Session, v: models.Vehicle, colleges: dict | None = None, driver: models.User | None = None) -> str | None:
     """Kategori kolej kenderaan: ditetapkan admin, atau ikut kolej pemandu. None = neutral (ambil mana-mana)."""
     if v.category in ("dekat", "jauh"):
         return v.category
-    drv = db.get(models.User, v.driver_id) if v.driver_id else None
+    drv = driver or (db.get(models.User, v.driver_id) if v.driver_id else None)
     if drv is None or not drv.college_id:
         return None
     col = colleges.get(drv.college_id) if colleges is not None else db.get(models.College, drv.college_id)
     return col.category if col and col.category in ("dekat", "jauh") else None
 
 
-def vehicle_zone(db: Session, v: models.Vehicle, colleges: dict | None = None) -> tuple[str | None, str | None]:
+def vehicle_zone(db: Session, v: models.Vehicle, colleges: dict | None = None, driver: models.User | None = None) -> tuple[str | None, str | None]:
     """(zon, kod kolej pemandu). Zon: dekat | jauhA | jauhB | None (neutral). Admin boleh tetapkan 'dekat'/'jauh' pada kenderaan."""
-    drv = db.get(models.User, v.driver_id) if v.driver_id else None
+    drv = driver or (db.get(models.User, v.driver_id) if v.driver_id else None)
     col = None
     if drv is not None and drv.college_id:
         col = colleges.get(drv.college_id) if colleges is not None else db.get(models.College, drv.college_id)
@@ -1088,9 +1157,12 @@ def assign_vehicles(db: Session, ev: models.TrainingEvent):
         veh_rows = [v for v in veh_rows if v.vehicle_type != VehicleType.motorcycle]
     vehicles = []
     for v in veh_rows:
-        zone, code = vehicle_zone(db, v, colleges)
-        vehicles.append({"id": v.id, "type": v.vehicle_type.value, "driver_gender": v.driver_gender.value,
-                         "rows": parse_rows(v.seat_rows), "category": vehicle_category(db, v, colleges),
+        eff_drv = effective_driver(db, v, d)
+        eff_gender = eff_drv.gender.value if (eff_drv and eff_drv.gender in (Gender.male, Gender.female)) else v.driver_gender.value
+        zone, code = vehicle_zone(db, v, colleges, driver=eff_drv)
+        cat = vehicle_category(db, v, colleges, driver=eff_drv)
+        vehicles.append({"id": v.id, "type": v.vehicle_type.value, "driver_gender": eff_gender,
+                         "rows": parse_rows(v.seat_rows), "category": cat,
                          "zone": zone, "college": code, "college_group": college_group(code) if code else None})
     finalised = ev.status == EventStatus.finalised
     # Jika ada ahli yang kenderaannya ditetapkan manual (pinned), kekalkan mereka walaupun status 'open'
@@ -1528,11 +1600,14 @@ def auto_ehailing(db: Session, ev: models.TrainingEvent) -> int:
 
 
 def prebet_users(db: Session):
-    """Pemandu/prebet aktif yang ada sekurang-kurangnya satu kenderaan diluluskan."""
+    """Pemandu/prebet aktif: ada sekurang-kurangnya satu kenderaan diluluskan ATAU mempunyai peranan driver (cth prebet pinjam kereta)."""
     ids = {r[0] for r in db.query(models.Vehicle.driver_id).filter(
         models.Vehicle.driver_id.isnot(None), models.Vehicle.active.is_(True),
         models.Vehicle.approval == models.ApprovalStatus.approved)}
-    return db.query(models.User).filter(models.User.id.in_(list(ids) or [0]), models.User.active.is_(True)).all()
+    driver_role_ids = {u.id for u in db.query(models.User.id).filter(
+        models.User.role == models.Role.driver, models.User.active.is_(True))}
+    all_ids = ids | driver_role_ids
+    return db.query(models.User).filter(models.User.id.in_(list(all_ids) or [0]), models.User.active.is_(True)).all()
 
 
 def notify_prebets_after_finalise(db: Session, ev: models.TrainingEvent):
@@ -1545,8 +1620,9 @@ def notify_prebets_after_finalise(db: Session, ev: models.TrainingEvent):
     cars_by_driver: dict[int, list] = defaultdict(list)
     for c in m["cars"]:
         v = db.get(models.Vehicle, c["vehicle_id"])
-        if v and v.driver_id:
-            cars_by_driver[v.driver_id].append(c)
+        eff_drv = effective_driver(db, v, d) if v else None
+        if eff_drv:
+            cars_by_driver[eff_drv.id].append(c)
     for u in prebet_users(db):
         if u.id in cars_by_driver:
             parts = []
@@ -1963,7 +2039,9 @@ def manifest(db: Session, d: date, vehicle_ids: set[int] | None = None, for_driv
         if vehicle_ids is not None and vid not in vehicle_ids:
             continue
         v = vehicles[vid]
-        drv = db.get(models.User, v.driver_id) if v.driver_id else None
+        drv = effective_driver(db, v, d)
+        owner = db.get(models.User, v.driver_id) if v.driver_id else None
+        is_borrowed = bool(drv and owner and drv.id != owner.id)
         stops: dict[tuple, dict] = {}
         for x in pax:
             key = (x["college"] or "-", x["checkpoint"] or "-")
@@ -1972,15 +2050,17 @@ def manifest(db: Session, d: date, vehicle_ids: set[int] | None = None, for_driv
             st["names"].append(x["name"])
         cats = {x["category"] for x in pax if x["category"]}
         out_cars.append({
-            "category": vehicle_category(db, v, colleges), "mixed": len(cats) > 1,
+            "category": vehicle_category(db, v, colleges, driver=drv), "mixed": len(cats) > 1,
             "stops": sorted(stops.values(), key=lambda t: (0 if t["category"] == "jauh" else 1, t["college"], t["checkpoint"])),
             "vehicle_id": vid, "name": v.name, "plate_no": v.plate_no, "capacity": v.capacity,
             "desc": vehicle_desc(v), "brand": v.brand, "colour": v.colour,
-            "driver_college": (college_group(vehicle_zone(db, v, colleges)[1]) if vehicle_zone(db, v, colleges)[1] else None),
+            "driver_college": (college_group(vehicle_zone(db, v, colleges, driver=drv)[1]) if vehicle_zone(db, v, colleges, driver=drv)[1] else None),
             "vehicle_type": v.vehicle_type.value, "seat_rows": v.seat_rows,
             "male": sum(1 for x in pax if x["gender"] == "male"),
             "female": sum(1 for x in pax if x["gender"] == "female"),
-            "driver": {"name": short(drv) if for_driver else drv.name, "short_name": short(drv), "phone": drv.phone, "gender": drv.gender.value if drv.gender else None} if drv else None,
+            "driver": {"name": short(drv) if for_driver else drv.name, "short_name": short(drv), "phone": drv.phone,
+                       "gender": drv.gender.value if drv.gender else None, "is_borrowed": is_borrowed,
+                       "owner_name": short(owner) if (is_borrowed and owner) else None} if drv else None,
             "passengers": sorted(pax, key=lambda x: (x["checkpoint"] or "", x["name"]))})
     return {"training_date": d.isoformat(), "event_status": ev.status.value if ev else None,
             "cars": out_cars, "unassigned": [] if vehicle_ids is not None else unassigned}
@@ -2029,7 +2109,7 @@ def payout_rows(db: Session, d: date) -> list[dict]:
     out = []
     for vid, uids in per_vehicle.items():
         v = vehicles[vid]
-        drv = db.get(models.User, v.driver_id) if v.driver_id else None
+        drv = effective_driver(db, v, d)
         sess = db.get(models.TrainingSession, sess_of[vid])
         collected = sum(pays[u].amount for u in uids if u in pays and pays[u].status == PaymentStatus.paid)
         expected = sum(pays[u].amount for u in uids if u in pays and pays[u].status != PaymentStatus.void)
