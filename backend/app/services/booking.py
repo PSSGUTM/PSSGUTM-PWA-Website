@@ -951,6 +951,26 @@ def _vehicles_for(db, d: date):
     out = []
     used_vids = set()
 
+    # 0. Kenderaan yang SUDAH ada penumpang/tempahan pada tarikh ini (ditetapkan oleh admin):
+    booked_vids = {r[0] for r in db.query(models.Booking.vehicle_id).filter(
+        models.Booking.training_date == d, models.Booking.status == models.BookingStatus.confirmed,
+        models.Booking.vehicle_id.isnot(None)).all()}
+    for vid in booked_vids:
+        v = db.get(models.Vehicle, vid)
+        if v and v.active and v.approval == models.ApprovalStatus.approved and vid not in used_vids:
+            out.append(v)
+            used_vids.add(vid)
+            if v.driver_id:
+                pa = db.query(models.PrebetAvailability).filter_by(training_date=d, vehicle_id=v.id).first()
+                if not pa:
+                    pa_drv = db.query(models.PrebetAvailability).filter_by(training_date=d, user_id=v.driver_id).first()
+                    if pa_drv:
+                        pa_drv.available = True
+                        pa_drv.vehicle_id = v.id
+                        pa_drv.by_admin = True
+                    else:
+                        db.add(models.PrebetAvailability(user_id=v.driver_id, training_date=d, available=True, by_admin=True, vehicle_id=v.id))
+
     # 1. Kenderaan yang dipilih prebet (termasuk kereta pinjam)
     for r in avails:
         if r.vehicle_id and r.vehicle_id in all_approved and r.vehicle_id not in used_vids:
@@ -1502,11 +1522,13 @@ def finalise_event(db: Session, ev: models.TrainingEvent) -> int:
     """Sahkan senarai: kunci kereta, buka bayaran, maklumkan semua ahli. Return bil. ahli."""
     if ev.status != EventStatus.open:
         raise ValueError("Latihan ini sudah disahkan atau dibatalkan")
-    apply_venue(db, ev)  # susun akhir
     _clear_unfinalised(db, ev)
+    # Kunci status finalised terlebih dahulu supaya susunan kenderaan sedia ada dikekalkan sepenuhnya
     ev.status = EventStatus.finalised
     ev.auto_off = False
     ev.finalised_at = now_my()
+    db.flush()
+    apply_venue(db, ev)  # susun akhir bagi baki yang belum ada kenderaan
     d = ev.training_date
     venue = db.get(models.Venue, ev.venue_id) if ev.venue_id else None
     rows = db.query(models.Booking).filter_by(training_date=d, session_id=ev.session_id,
@@ -2491,9 +2513,20 @@ def move_seat(db: Session, ev: models.TrainingEvent, user: models.User, vehicle_
         mybk.vehicle_id = v.id
     for b in mine:
         b.vehicle_id = v.id
+        b.pinned = True
         b.ehailing, b.ehailing_note = False, ""
         if b.direction not in plan:
             b.seat = None
+    if v and v.driver_id:
+        pa = db.query(models.PrebetAvailability).filter_by(training_date=d, vehicle_id=v.id).first()
+        if not pa:
+            pa_drv = db.query(models.PrebetAvailability).filter_by(training_date=d, user_id=v.driver_id).first()
+            if pa_drv:
+                pa_drv.available = True
+                pa_drv.vehicle_id = v.id
+                pa_drv.by_admin = True
+            else:
+                db.add(models.PrebetAvailability(user_id=v.driver_id, training_date=d, available=True, by_admin=True, vehicle_id=v.id))
     db.flush()
     refresh_fees(db, ev)
     if ev.status == EventStatus.finalised and prev_vid != v.id:

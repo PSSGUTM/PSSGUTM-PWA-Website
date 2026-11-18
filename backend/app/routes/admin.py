@@ -279,7 +279,25 @@ def assign_manual(data: AssignIn, db: Session = Depends(get_db)):
     for b in rows:
         b.vehicle_id = data.vehicle_id
         b.pinned = data.vehicle_id is not None   # pin jika tetapkan; unpin jika keluarkan
+        if data.vehicle_id is not None:
+            b.ehailing = False
+            b.ehailing_note = ""
     db.flush()
+
+    # Jika admin tetapkan kenderaan, pastikan pemandu kenderaan tersebut direkodkan sah bertugas (PrebetAvailability)
+    if data.vehicle_id is not None:
+        v = db.get(models.Vehicle, data.vehicle_id)
+        if v and v.driver_id:
+            pa = db.query(models.PrebetAvailability).filter_by(training_date=data.training_date, vehicle_id=v.id).first()
+            if not pa:
+                pa_drv = db.query(models.PrebetAvailability).filter_by(training_date=data.training_date, user_id=v.driver_id).first()
+                if pa_drv:
+                    pa_drv.available = True
+                    pa_drv.vehicle_id = v.id
+                    pa_drv.by_admin = True
+                else:
+                    db.add(models.PrebetAvailability(user_id=v.driver_id, training_date=data.training_date,
+                                                     available=True, by_admin=True, vehicle_id=v.id))
     ev = svc.event_on(db, data.training_date)
     if ev:
         svc.refresh_fees(db, ev)
