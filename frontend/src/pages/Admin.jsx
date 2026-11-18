@@ -135,8 +135,16 @@ function Summary() {
             <span className="muted small">{e.payments.pending_verify} tunggu verify · {e.payments.unpaid} belum bayar</span></div>
           {e.status === "finalised" && (
             <div className="moneybox">
-              <div><span className="small">Ahli perlu bayar (persatuan kutip)</span><b>RM{(e.payments.to_collect ?? 0).toFixed(2)}</b><span className="small muted">{e.payments.members} ahli · dah masuk RM{e.payments.collected.toFixed(2)}</span></div>
-              <div><span className="small">Bendahari perlu bayar prebet</span><b>RM{(e.payout_due ?? 0).toFixed(2)}</b><span className="small muted">bayaran tetap ikut kenderaan</span></div>
+              <div>
+                <span className="small">Jumlah Kutipan Ahli (Patut Dikutip)</span>
+                <b>RM{(e.payments.expected ?? 0).toFixed(2)}</b>
+                <span className="small muted">Dah masuk RM{e.payments.collected.toFixed(2)} · Baki belum bayar: RM{(e.payments.to_collect ?? 0).toFixed(2)} ({e.payments.unpaid} ahli)</span>
+              </div>
+              <div>
+                <span className="small">Bendahari perlu bayar prebet</span>
+                <b>RM{(e.payout_due ?? 0).toFixed(2)}</b>
+                <span className="small muted">bayaran tetap ikut kenderaan ({e.vehicles_used || 0} kenderaan)</span>
+              </div>
             </div>
           )}
           {e.status === "open" && <p className="small muted">Sahkan senarai dahulu supaya ahli boleh bayar dan bendahari boleh bayar prebet. Jika anda tak sahkan, sistem sahkan automatik pada waktu yang ditetapkan{e.auto_off ? " (DIMATIKAN untuk latihan ini: anda mesti sahkan sendiri)" : ""}.</p>}
