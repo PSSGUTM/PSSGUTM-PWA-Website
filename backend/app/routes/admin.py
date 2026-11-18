@@ -278,6 +278,7 @@ def assign_manual(data: AssignIn, db: Session = Depends(get_db)):
     prev = rows[0].vehicle_id
     for b in rows:
         b.vehicle_id = data.vehicle_id
+        b.pinned = data.vehicle_id is not None   # pin jika tetapkan; unpin jika keluarkan
     db.flush()
     ev = svc.event_on(db, data.training_date)
     if ev:
@@ -311,7 +312,8 @@ def _vehicle_out(db, v):
     zone, dcode = svc.vehicle_zone(db, v)
     return {"id": v.id, "name": v.name, "brand": v.brand, "colour": v.colour, "desc": svc.vehicle_desc(v),
             "plate_no": v.plate_no, "driver_id": v.driver_id, "driver_college": dcode, "zone": zone,
-            "driver_name": drv.name if drv else None, "driver_phone": drv.phone if drv else None,
+            "driver_name": drv.name if drv else None, "driver_short_name": svc.short(drv) if drv else None,
+            "driver_phone": drv.phone if drv else None,
             "vehicle_type": v.vehicle_type.value, "driver_gender": v.driver_gender.value,
             "seat_rows": v.seat_rows, "capacity": v.capacity, "kind_name": v.kind_name or "", "available_days": v.available_days,
             "approval": v.approval.value, "active": v.active, "safety_confirmed": v.safety_confirmed,
@@ -474,17 +476,31 @@ def reject_vehicle(vid: int, db: Session = Depends(get_db)):
 
 
 @router.delete("/vehicles/{vid}")
-def delete_vehicle(vid: int, me: models.User = Depends(require_admin), db: Session = Depends(get_db)):
-    """Padam kenderaan (cth spam). Jika sudah pernah digunakan, guna Nyahaktif/Tolak."""
+def delete_vehicle(vid: int, force: bool = False, me: models.User = Depends(require_admin), db: Session = Depends(get_db)):
+    """Padam kenderaan. force=true: buang semua rekod berkaitan (booking, payout, unavailable) walaupun sudah digunakan."""
     v = _get(db, models.Vehicle, vid, "Kenderaan tak jumpa")
-    if db.query(models.Booking).filter_by(vehicle_id=v.id).first() or db.query(models.DriverPayout).filter_by(vehicle_id=v.id).first():
-        raise HTTPException(400, "Kenderaan ini sudah digunakan. Guna 'Tolak' atau 'Nyahaktif' sahaja.")
+    has_history = bool(db.query(models.Booking).filter_by(vehicle_id=v.id).first()
+                       or db.query(models.DriverPayout).filter_by(vehicle_id=v.id).first())
+    if has_history and not force:
+        raise HTTPException(400, "Kenderaan ini sudah digunakan. Guna 'Padam paksa' untuk buang semua rekodnya, "
+                                 "atau 'Nyahaktif'/'Tolak' sahaja.")
+    # Lepaskan penumpang yang masih ditempah ke kenderaan ini
+    dates = set()
+    for b in db.query(models.Booking).filter_by(vehicle_id=v.id).all():
+        b.vehicle_id = None
+        dates.add(b.training_date)
+    db.query(models.DriverPayout).filter_by(vehicle_id=v.id).delete()
     db.query(models.VehicleUnavailable).filter_by(vehicle_id=v.id).delete()
     db.delete(v)
     db.flush()
+    # Susun semula latihan terbuka yang terjejas
+    if dates:
+        for ev in db.query(models.TrainingEvent).filter(models.TrainingEvent.training_date.in_(dates)).all():
+            if ev.status != EventStatus.cancelled:
+                svc.assign_vehicles(db, ev)
     _reassign_open(db)
     db.commit()
-    return {"ok": True}
+    return {"ok": True, "forced": has_history}
 
 
 # ------------------------------------------------------------ users

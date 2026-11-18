@@ -1071,8 +1071,12 @@ def assign_vehicles(db: Session, ev: models.TrainingEvent):
         return cat, (zone_of(col.code, cat) if col else None), (col.code if col else None)
 
     members = []
+    pinned_users = set()
     for uid in ordered:
         cat, zone, code = member_info(users[uid], next((b for b in by_user[uid] if b.direction == Direction.going), by_user[uid][0]))
+        is_pinned = any(getattr(b, "pinned", False) for b in by_user[uid])
+        if is_pinned:
+            pinned_users.add(uid)
         members.append({
             "user_id": uid,
             "gender": users[uid].gender.value if users[uid].gender in (Gender.male, Gender.female) else "male",
@@ -1089,8 +1093,15 @@ def assign_vehicles(db: Session, ev: models.TrainingEvent):
                          "rows": parse_rows(v.seat_rows), "category": vehicle_category(db, v, colleges),
                          "zone": zone, "college": code, "college_group": college_group(code) if code else None})
     finalised = ev.status == EventStatus.finalised
+    # Jika ada ahli yang kenderaannya ditetapkan manual (pinned), kekalkan mereka walaupun status 'open'
+    has_pinned = bool(pinned_users)
+    if not finalised and has_pinned:
+        # Kosongkan current_vehicle_id bagi ahli yang BUKAN pinned supaya mereka disusun semula
+        for m in members:
+            if m["user_id"] not in pinned_users:
+                m["current_vehicle_id"] = None
     lone_rule = config.LONE_FEMALE_RULE
-    plan = plan_assignment(members, vehicles, keep_existing=finalised,
+    plan = plan_assignment(members, vehicles, keep_existing=(finalised or has_pinned),
                            combine_below=config.COMBINE_BELOW_PASSENGERS, no_lone_female=lone_rule)
     for uid, vid in plan.items():
         prev = by_user[uid][0].vehicle_id

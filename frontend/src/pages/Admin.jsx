@@ -49,7 +49,7 @@ function Manifest({ date, onChange }) {
               <span>{p.name} ({p.college}, {p.gender === "male" ? "L" : "P"})</span>
               <select defaultValue="" onChange={(e) => e.target.value && assign(p.user_id, e.target.value)} style={{ width: "auto" }}>
                 <option value="">Tetapkan kenderaan…</option>
-                {usable.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
+                {usable.map((v) => <option key={v.id} value={v.id}>{v.name}{v.driver_short_name ? ` (${v.driver_short_name})` : ""}</option>)}
               </select>
             </div>
           ))}
@@ -345,7 +345,15 @@ function Vehicles() {
   }
   const toggle = (v) => api.put(`/admin/vehicles/${v.id}`, body({ ...v, active: !v.active })).then(load).catch(fail);
   const decide = (v, what) => api.post(`/admin/vehicles/${v.id}/${what}`).then(load).catch(fail);
-  const del = (v) => confirm(`Padam kenderaan ${v.name} (${v.plate_no})? Tak boleh diundur.`) && api.del(`/admin/vehicles/${v.id}`).then(load).catch(fail);
+  const del = async (v) => {
+    if (!confirm(`Padam kenderaan ${v.name} (${v.plate_no})? Tak boleh diundur.`)) return;
+    try { await api.del(`/admin/vehicles/${v.id}`); load(); }
+    catch (e) {
+      if (/paksa/i.test(e.message) && confirm(`${v.name} sudah digunakan.\n\nPadam paksa? Semua rekod berkaitan (booking, bayaran prebet) turut dipadam. Tak boleh diundur.`)) {
+        api.del(`/admin/vehicles/${v.id}?force=true`).then(load).catch(fail);
+      } else { fail(e); }
+    }
+  };
   const toggleDay = (d) => setF({ ...f, days: f.days.includes(d) ? f.days.filter((x) => x !== d) : [...f.days, d] });
   const pending = vs.filter((v) => v.approval === "pending");
   const chosen = (users || []).find((u) => String(u.id) === String(f.driver_id));

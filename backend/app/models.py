@@ -290,6 +290,8 @@ class Booking(Base):
     ehailing_note: Mapped[str] = mapped_column(String(300), default="")
     # Dipilih ahli ikut tarikh (bukan daripada jadual berulang): tak dibatalkan bila jadual berulang diubah
     manual: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Kenderaan ditetapkan oleh admin secara manual: kekalkan walaupun susun automatik dilakukan semula
+    pinned: Mapped[bool] = mapped_column(Boolean, default=False)
     # Dibatalkan kerana LATIHAN dibatalkan (bukan ahli batal sendiri): dipulihkan jika latihan diaktifkan semula
     cancelled_by_event: Mapped[bool] = mapped_column(Boolean, default=False)
     # Aktiviti luar: tempat ambil selain checkpoint kolej (ahli taip nama, atau admin tetapkan). Kosong = ikut checkpoint kolej.

@@ -36,7 +36,8 @@ def run_migrations():
     for name, ddl in (("ehailing", "BOOLEAN DEFAULT FALSE"), ("ehailing_note", "VARCHAR(300) DEFAULT ''"),
                       ("manual", "BOOLEAN DEFAULT FALSE"), ("seat", "VARCHAR(8)"),
                       ("cancelled_by_event", "BOOLEAN DEFAULT FALSE"),
-                      ("pickup_place", "VARCHAR(120) DEFAULT ''")):
+                      ("pickup_place", "VARCHAR(120) DEFAULT ''"),
+                      ("pinned", "BOOLEAN DEFAULT FALSE")):
         if name not in bcols:
             with engine.begin() as conn:
                 conn.execute(text(f"ALTER TABLE bookings ADD COLUMN {name} {ddl}"))

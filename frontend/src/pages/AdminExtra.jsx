@@ -9,7 +9,7 @@ function useLoad(path, deps = []) {
   const [err, setErr] = useState("");
   const load = () => (path ? api.get(path).then(setData).catch((e) => setErr(e.message)) : Promise.resolve());
   useEffect(() => { setData(null); load(); }, deps);
-  return [data, load, err];
+  return [data, load, err, setData];
 }
 
 /* ---------- Pemantau aliran satu tarikh: prebet sahkan -> senarai -> resit ahli -> bayar prebet -> resit prebet ---------- */
@@ -392,7 +392,7 @@ const MONTHS_MY = [
 export function DutyRoster() {
   const me = auth.get()?.user;
   const [month, setMonth] = useState(new Date().toISOString().slice(0, 7));
-  const [d, load] = useLoad(`/admin/duty?month=${month}`, [month]);
+  const [d, load, , setD] = useLoad(`/admin/duty?month=${month}`, [month]);
   const [selectedUid, setSelectedUid] = useState(null);
   const [f, setF] = useState(null);
 
@@ -417,7 +417,7 @@ export function DutyRoster() {
     if (d && d.admins?.length > 0) {
       const targetUid = selectedUid || me?.id || d.admins[0].user_id;
       const target = d.admins.find((a) => a.user_id === targetUid) || d.admins[0];
-      setSelectedUid(target.user_id);
+      if (selectedUid !== target.user_id) setSelectedUid(target.user_id);
       setF({
         user_id: target.user_id,
         name: target.name || target.short_name,
@@ -425,7 +425,7 @@ export function DutyRoster() {
         phone: target.phone || target.profile_phone || "",
       });
     }
-  }, [d, selectedUid]);
+  }, [d]);
 
   const selectAdmin = (a) => {
     setSelectedUid(a.user_id);
@@ -437,12 +437,16 @@ export function DutyRoster() {
     });
   };
 
-  const save = (e) => {
+  const save = async (e) => {
     e.preventDefault();
     if (!f) return;
-    api.put("/admin/duty", { month, user_id: f.user_id, weekdays: f.weekdays, phone: f.phone })
-      .then(() => { alert(`Jadual bertugas untuk ${f.name} berjaya disimpan.`); load(); })
-      .catch(fail);
+    try {
+      const updated = await api.put("/admin/duty", { month, user_id: f.user_id, weekdays: f.weekdays, phone: f.phone });
+      if (setD) setD(updated);
+      alert(`Jadual bertugas untuk ${f.name} berjaya disimpan.`);
+    } catch (e2) {
+      fail(e2);
+    }
   };
 
   const tg = (i) => setF((prev) => ({
@@ -507,8 +511,71 @@ export function DutyRoster() {
         </div>
       </div>
 
+      {/* Ringkasan PIC Bertugas Mingguan */}
+      <div style={{ background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 12, padding: "1rem", marginBottom: "1.2rem" }}>
+        <h4 className="small" style={{ margin: "0 0 .5rem", color: "var(--accent)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <span>📋 Jadual PIC Bertugas Mengikut Hari ({MONTHS_MY[currM - 1]} {currY}):</span>
+          <span className="small muted" style={{ fontWeight: 400, fontSize: ".78rem" }}>Boleh lebih dari 2 orang bertugas serentak</span>
+        </h4>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: ".6rem", marginTop: ".6rem" }}>
+          {WD_FULL.map((label, dayIdx) => {
+            const isTraining = dayIdx === 2 || dayIdx === 5;
+            const assigned = (d.admins || []).filter((a) => a.weekdays.includes(dayIdx));
+            return (
+              <div
+                key={dayIdx}
+                style={{
+                  border: isTraining ? "1.5px solid var(--accent, #D4A94E)" : "1px solid var(--line)",
+                  background: isTraining ? "rgba(212, 169, 78, 0.08)" : "var(--bg)",
+                  borderRadius: 10,
+                  padding: ".7rem .85rem",
+                }}
+              >
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: ".4rem" }}>
+                  <b style={{ color: isTraining ? "var(--accent)" : "var(--text)", fontSize: ".88rem" }}>
+                    {label} {isTraining ? "🥋" : ""}
+                  </b>
+                  <span
+                    className="small"
+                    style={{
+                      fontSize: ".7rem",
+                      padding: "2px 7px",
+                      borderRadius: 12,
+                      background: assigned.length ? "var(--accent)" : "rgba(255,255,255,0.06)",
+                      color: assigned.length ? "#170f0e" : "var(--muted)",
+                      fontWeight: 700,
+                    }}
+                  >
+                    {assigned.length ? `${assigned.length} PIC` : "Umum"}
+                  </span>
+                </div>
+                {assigned.length > 0 ? (
+                  <div style={{ display: "flex", flexDirection: "column", gap: ".35rem" }}>
+                    {assigned.map((a) => (
+                      <div key={a.user_id} className="small" style={{ lineHeight: 1.35 }}>
+                        <div style={{ fontWeight: 600, color: "var(--text)" }}>{a.name || a.short_name}</div>
+                        <div style={{ fontSize: ".74rem", color: "var(--muted)" }}>{a.post}</div>
+                        <div style={{ fontSize: ".75rem", marginTop: "1px" }}>
+                          📞 <a href={`https://wa.me/${(a.phone || a.profile_phone || "").replace(/\+/g, "")}`} target="_blank" rel="noreferrer" style={{ color: "var(--accent)", textDecoration: "underline" }}>
+                            {a.phone || a.profile_phone || "Tiada no telefon"}
+                          </a>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="small muted" style={{ fontStyle: "italic", fontSize: ".78rem" }}>
+                    Tiada PIC khas. (Guna no persatuan: {d.site?.phone || "tiada"})
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
       <h4 className="small" style={{ margin: "1rem 0 .5rem", color: "var(--accent)" }}>
-        Senarai Admin &amp; Hari Bertugas ({MONTHS_MY[currM - 1]} {currY}):
+        Senarai Admin &amp; Tetapan Hari ({MONTHS_MY[currM - 1]} {currY}):
       </h4>
       <div style={{ display: "flex", flexDirection: "column", gap: ".5rem", marginBottom: "1.2rem" }}>
         {d.admins.map((a) => {
