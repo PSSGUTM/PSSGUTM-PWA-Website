@@ -45,7 +45,13 @@ export function MTBiro() {
   const [chart, setChart] = useState("");
   const [uploading, setUploading] = useState(false);
   const fileRef = useRef(null);
-  const isAdmin = auth.get()?.user?.role === "admin";
+  const [isAdmin, setIsAdmin] = useState(auth.get()?.user?.role === "admin");
+
+  useEffect(() => {
+    api.get("/persatuan/me").then((m) => {
+      if (m?.perms?.admin) setIsAdmin(true);
+    }).catch(() => {});
+  }, []);
 
   const loadChart = () => api.get("/persatuan/org-chart").then((r) => setChart(r.image || "")).catch(() => {});
 

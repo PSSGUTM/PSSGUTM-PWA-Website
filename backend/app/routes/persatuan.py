@@ -555,9 +555,34 @@ def person_of(db: Session, user: models.User) -> Person | None:
     return None
 
 
-def can(db: Session, user: models.User, flag: str) -> bool:
-    """Admin sentiasa boleh. Selain itu: ada jawatan semasa dalam biro (atau seki di bawah biro) yang diberi kebenaran."""
+def is_persatuan_admin(db: Session, user: models.User) -> bool:
+    """Admin utama (role == admin) ATAU pemegang jawatan aktif dalam Majlis Tertinggi (MT) / mana-mana Biro."""
     if user.role == models.Role.admin:
+        return True
+    p = person_of(db, user)
+    if p is None:
+        return False
+    cur_sess = pp.session_now(db, svc.today_my())
+    # Semak sama ada orang ini memegang sebarang jawatan aktif (MT atau Biro)
+    has_post = db.query(Post).filter(
+        Post.person_id == p.id,
+        Post.current.is_(True),
+        (Post.session == cur_sess) | (Post.session == "") | (Post.session.is_(None))
+    ).first()
+    if not has_post:
+        has_post = db.query(Post).filter_by(person_id=p.id, current=True).first()
+    return has_post is not None
+
+
+def require_persatuan_admin(user: models.User = Depends(get_current_user), db: Session = Depends(get_db)) -> models.User:
+    if not is_persatuan_admin(db, user):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Hanya admin atau MT/Biro yang dibenarkan")
+    return user
+
+
+def can(db: Session, user: models.User, flag: str) -> bool:
+    """Admin utama dan MT/Biro sentiasa boleh. Selain itu: semak flag kebenaran biro."""
+    if user.role == models.Role.admin or is_persatuan_admin(db, user):
         return True
     p = person_of(db, user)
     if p is None:
@@ -618,10 +643,11 @@ def _posts_out(db, person_id):
 def me(user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
     p = person_of(db, user)
     n = db.query(AttendRecord).filter_by(person_id=p.id).count() if p else 0
+    is_admin = is_persatuan_admin(db, user)
     return {"person": person_out(db, p) if p else None, "posts": _posts_out(db, p.id) if p else [],
             "attended": n,
-            "perms": {"admin": user.role == models.Role.admin, "attendance": can(db, user, "can_attendance"),
-                      "inventory": can(db, user, "can_inventory")}}
+            "perms": {"admin": is_admin, "attendance": can(db, user, "can_attendance") or is_admin,
+                      "inventory": can(db, user, "can_inventory") or is_admin}}
 
 
 @router.get("/me/belts")
@@ -649,7 +675,7 @@ def list_belts(user: models.User = Depends(get_current_user), db: Session = Depe
             for b in db.query(BeltLevel).order_by(BeltLevel.rank, BeltLevel.id)]
 
 
-@router.post("/belts", dependencies=[Depends(require_admin)])
+@router.post("/belts", dependencies=[Depends(require_persatuan_admin)])
 def add_belt(data: BeltIn, db: Session = Depends(get_db)):
     name = data.name.strip()
     if db.query(BeltLevel).filter(func.lower(BeltLevel.name) == name.lower()).first():
@@ -661,7 +687,7 @@ def add_belt(data: BeltIn, db: Session = Depends(get_db)):
     return {"id": b.id}
 
 
-@router.put("/belts/order", dependencies=[Depends(require_admin)])
+@router.put("/belts/order", dependencies=[Depends(require_persatuan_admin)])
 def order_belts(ids: list[int], db: Session = Depends(get_db)):
     for i, bid in enumerate(ids):
         b = db.get(BeltLevel, bid)
@@ -671,7 +697,7 @@ def order_belts(ids: list[int], db: Session = Depends(get_db)):
     return {"ok": True}
 
 
-@router.put("/belts/{bid}", dependencies=[Depends(require_admin)])
+@router.put("/belts/{bid}", dependencies=[Depends(require_persatuan_admin)])
 def rename_belt(bid: int, data: BeltIn, db: Session = Depends(get_db)):
     b = db.get(BeltLevel, bid)
     if b is None:
@@ -685,7 +711,7 @@ def rename_belt(bid: int, data: BeltIn, db: Session = Depends(get_db)):
     return {"ok": True}
 
 
-@router.delete("/belts/{bid}", dependencies=[Depends(require_admin)])
+@router.delete("/belts/{bid}", dependencies=[Depends(require_persatuan_admin)])
 def delete_belt(bid: int, db: Session = Depends(get_db)):
     if db.query(Person).filter_by(belt_id=bid).count():
         raise HTTPException(400, "Masih ada ahli pada peringkat ini. Tukar peringkat mereka dahulu.")
@@ -815,7 +841,7 @@ def sync_person_to_roster(db: Session, p: Person, old_mno: str | None = None):
         pass
 
 
-@router.get("/people", dependencies=[Depends(require_admin)])
+@router.get("/people", dependencies=[Depends(require_persatuan_admin)])
 def list_people(q: str = "", kind: str = "", due: bool = False, limit: int = 300, offset: int = 0,
                 db: Session = Depends(get_db)):
     if db.query(Person).count() == 0:
@@ -850,7 +876,7 @@ def search_people(q: str = "", user: models.User = Depends(get_current_user), db
     return [{"id": p.id, "name": p.name, "member_no": p.member_no, "kind": p.kind} for p in rows]
 
 
-@router.post("/people", dependencies=[Depends(require_admin)])
+@router.post("/people", dependencies=[Depends(require_persatuan_admin)])
 def create_person(data: PersonIn, db: Session = Depends(get_db)):
     if db.query(Person).filter(func.lower(Person.email) == data.email.strip().lower()).first():
         raise HTTPException(409, "Emel itu sudah ada dalam senarai")
@@ -866,7 +892,7 @@ def create_person(data: PersonIn, db: Session = Depends(get_db)):
     return person_out(db, p)
 
 
-@router.put("/people/{pid}", dependencies=[Depends(require_admin)])
+@router.put("/people/{pid}", dependencies=[Depends(require_persatuan_admin)])
 def update_person(pid: int, data: PersonIn, db: Session = Depends(get_db)):
     p = db.get(Person, pid)
     if p is None:
@@ -884,7 +910,7 @@ def update_person(pid: int, data: PersonIn, db: Session = Depends(get_db)):
     return person_out(db, p)
 
 
-@router.get("/people/{pid}", dependencies=[Depends(require_admin)])
+@router.get("/people/{pid}", dependencies=[Depends(require_persatuan_admin)])
 def get_person(pid: int, db: Session = Depends(get_db)):
     p = db.get(Person, pid)
     if p is None:
@@ -893,7 +919,7 @@ def get_person(pid: int, db: Session = Depends(get_db)):
             "attended": db.query(AttendRecord).filter_by(person_id=pid).count()}
 
 
-@router.delete("/people/{pid}", dependencies=[Depends(require_admin)])
+@router.delete("/people/{pid}", dependencies=[Depends(require_persatuan_admin)])
 def delete_person(pid: int, db: Session = Depends(get_db)):
     p = db.get(Person, pid)
     if p is None:
@@ -914,7 +940,7 @@ class ConvertIn(BaseModel):
     new_end: date | None = None
 
 
-@router.get("/conversions", dependencies=[Depends(require_admin)])
+@router.get("/conversions", dependencies=[Depends(require_persatuan_admin)])
 def conversions(db: Session = Depends(get_db)):
     today = svc.today_my()
     rows = (db.query(Person).filter(Person.kind == "SG", Person.study_end.isnot(None), Person.study_end <= today,
@@ -922,7 +948,7 @@ def conversions(db: Session = Depends(get_db)):
     return [person_out(db, p, today) for p in rows]
 
 
-@router.post("/conversions/{pid}", dependencies=[Depends(require_admin)])
+@router.post("/conversions/{pid}", dependencies=[Depends(require_persatuan_admin)])
 def convert(pid: int, data: ConvertIn, db: Session = Depends(get_db)):
     p = db.get(Person, pid)
     if p is None or p.kind != "SG":
@@ -945,7 +971,7 @@ def convert(pid: int, data: ConvertIn, db: Session = Depends(get_db)):
 
 # ---------------------------------------------------------------- import Excel
 
-@router.post("/import", dependencies=[Depends(require_admin)])
+@router.post("/import", dependencies=[Depends(require_persatuan_admin)])
 async def import_xlsx(file: UploadFile = File(...), dry_run: bool = Form(True), db: Session = Depends(get_db)):
     raw = await file.read(8_000_001)
     if len(raw) > 8_000_000:
@@ -1049,7 +1075,7 @@ CSV_ROSTER_COLS = {
 }
 
 
-@router.post("/import-csv", dependencies=[Depends(require_admin)])
+@router.post("/import-csv", dependencies=[Depends(require_persatuan_admin)])
 async def import_csv(file: UploadFile = File(...), db: Session = Depends(get_db)):
     """Import CSV ringkas (no ahli, nama, jantina, kolej, emel, telefon).
     Automatik kemas kini modul Persatuan (Person) DAN kelayakan pengangkutan (MemberRoster)."""
@@ -1161,7 +1187,7 @@ async def import_csv(file: UploadFile = File(...), db: Session = Depends(get_db)
 
 # ---------------------------------------------------------------- semak nombor ahli tidak sah
 
-@router.get("/people/invalid-member-nos", dependencies=[Depends(require_admin)])
+@router.get("/people/invalid-member-nos", dependencies=[Depends(require_persatuan_admin)])
 def list_invalid_member_nos(db: Session = Depends(get_db)):
     """Senarai ahli dengan nombor ahli SG yang tahunnya bukan bersebelahan."""
     invalids = [
@@ -1173,7 +1199,7 @@ def list_invalid_member_nos(db: Session = Depends(get_db)):
     return {"count": len(invalids), "items": invalids}
 
 
-@router.post("/people/notify-invalid-member-nos", dependencies=[Depends(require_admin)])
+@router.post("/people/notify-invalid-member-nos", dependencies=[Depends(require_persatuan_admin)])
 def retrigger_invalid_member_no_notify(db: Session = Depends(get_db)):
     """Reset guard dan hantar semula notifikasi kepada ahli dengan no ahli tidak sah."""
     GUARD_KEY = "notified_invalid_sg_no_v1"
@@ -1201,7 +1227,7 @@ def list_biros(user: models.User = Depends(get_current_user), db: Session = Depe
              "can_inventory": b.can_inventory} for b in db.query(Biro).order_by(Biro.parent_id.isnot(None), Biro.name)]
 
 
-@router.post("/biros", dependencies=[Depends(require_admin)])
+@router.post("/biros", dependencies=[Depends(require_persatuan_admin)])
 def add_biro(data: BiroIn, db: Session = Depends(get_db)):
     if db.query(Biro).filter(func.lower(Biro.name) == data.name.strip().lower()).first():
         raise HTTPException(409, "Nama itu sudah ada")
@@ -1212,7 +1238,7 @@ def add_biro(data: BiroIn, db: Session = Depends(get_db)):
     return {"id": b.id}
 
 
-@router.put("/biros/{bid}", dependencies=[Depends(require_admin)])
+@router.put("/biros/{bid}", dependencies=[Depends(require_persatuan_admin)])
 def edit_biro(bid: int, data: BiroIn, db: Session = Depends(get_db)):
     b = db.get(Biro, bid)
     if b is None:
@@ -1226,7 +1252,7 @@ def edit_biro(bid: int, data: BiroIn, db: Session = Depends(get_db)):
     return {"ok": True}
 
 
-@router.delete("/biros/{bid}", dependencies=[Depends(require_admin)])
+@router.delete("/biros/{bid}", dependencies=[Depends(require_persatuan_admin)])
 def delete_biro(bid: int, db: Session = Depends(get_db)):
     if db.query(Post).filter_by(biro_id=bid).count() or db.query(Biro).filter_by(parent_id=bid).count():
         raise HTTPException(400, "Masih ada jawatan atau seki di bawahnya")
@@ -1246,7 +1272,7 @@ class PostIn(BaseModel):
     current: bool = True
 
 
-@router.post("/posts", dependencies=[Depends(require_admin)])
+@router.post("/posts", dependencies=[Depends(require_persatuan_admin)])
 def add_post(data: PostIn, db: Session = Depends(get_db)):
     if not pp.valid_session(data.session):
         raise HTTPException(400, "Sesi tak sah (cth 2425)")
@@ -1259,7 +1285,7 @@ def add_post(data: PostIn, db: Session = Depends(get_db)):
     return {"id": x.id}
 
 
-@router.put("/posts/{xid}", dependencies=[Depends(require_admin)])
+@router.put("/posts/{xid}", dependencies=[Depends(require_persatuan_admin)])
 def edit_post(xid: int, current: bool, db: Session = Depends(get_db)):
     x = db.get(Post, xid)
     if x is None:
@@ -1269,7 +1295,7 @@ def edit_post(xid: int, current: bool, db: Session = Depends(get_db)):
     return {"ok": True}
 
 
-@router.delete("/posts/{xid}", dependencies=[Depends(require_admin)])
+@router.delete("/posts/{xid}", dependencies=[Depends(require_persatuan_admin)])
 def delete_post(xid: int, db: Session = Depends(get_db)):
     x = db.get(Post, xid)
     if x:
@@ -1557,13 +1583,13 @@ class SessionIn(BaseModel):
     code: str
 
 
-@router.get("/session", dependencies=[Depends(require_admin)])
+@router.get("/session", dependencies=[Depends(require_persatuan_admin)])
 def get_session(db: Session = Depends(get_db)):
     code = pp.session_now(db, svc.today_my())
     return {"code": code, "label": pp.session_label(code), "auto": pp.current_session(svc.today_my())}
 
 
-@router.put("/session", dependencies=[Depends(require_admin)])
+@router.put("/session", dependencies=[Depends(require_persatuan_admin)])
 def set_session(data: SessionIn, db: Session = Depends(get_db)):
     """Admin tetapkan sesi semasa (cth 2728). Sesi layak tempah transport turut beralih jika ia ikut sesi lama."""
     code = data.code.strip()
@@ -1662,7 +1688,7 @@ def get_org_chart(db: Session = Depends(get_db)):
     return {"image": val.value if val and val.value else ""}
 
 
-@router.post("/org-chart", dependencies=[Depends(require_admin)])
+@router.post("/org-chart", dependencies=[Depends(require_persatuan_admin)])
 async def upload_org_chart(file: UploadFile = File(...), db: Session = Depends(get_db)):
     """Muat naik gambar carta hierarki organisasi jawatankuasa."""
     old = db.get(models.Setting, "org_chart_file")
@@ -1677,7 +1703,7 @@ async def upload_org_chart(file: UploadFile = File(...), db: Session = Depends(g
     return {"image": name}
 
 
-@router.delete("/org-chart", dependencies=[Depends(require_admin)])
+@router.delete("/org-chart", dependencies=[Depends(require_persatuan_admin)])
 def delete_org_chart(db: Session = Depends(get_db)):
     """Padam gambar carta organisasi."""
     old = db.get(models.Setting, "org_chart_file")

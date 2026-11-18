@@ -16,6 +16,13 @@ from .bookings import save_upload
 
 router = APIRouter(prefix="/laman", tags=["laman"])
 
+
+def require_persatuan_admin(user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from .persatuan import is_persatuan_admin
+    if not is_persatuan_admin(db, user):
+        raise HTTPException(403, "Hanya admin atau MT/Biro yang dibenarkan")
+    return user
+
 KINDS = ("pengumuman", "kebajikan", "event")   # 'kebajikan' ialah bahagian banner bawah (nama boleh diubah admin)
 DEFAULT_TITLES = {"pengumuman": "Pengumuman", "event": "Event", "kebajikan": "News",
                   "sistem": "Sistem & Aplikasi", "jadual": "Jadual Latihan"}
@@ -92,7 +99,7 @@ class TitlesIn(BaseModel):
     titles: dict[str, str]
 
 
-@router.put("/titles", dependencies=[Depends(require_admin)])
+@router.put("/titles", dependencies=[Depends(require_persatuan_admin)])
 def set_titles(data: TitlesIn, db: Session = Depends(get_db)):
     clean = {k: v.strip()[:40] for k, v in data.titles.items() if k in DEFAULT_TITLES and v.strip()}
     _set(db, "home_titles", json.dumps(clean, ensure_ascii=False))
@@ -100,7 +107,7 @@ def set_titles(data: TitlesIn, db: Session = Depends(get_db)):
     return _titles(db)
 
 
-@router.put("/design", dependencies=[Depends(require_admin)])
+@router.put("/design", dependencies=[Depends(require_persatuan_admin)])
 async def set_design(mode: str = Form("corak"), pattern: str = Form("batik"), remove_bg: bool = Form(False),
                      remove_poster: bool = Form(False), bg: UploadFile | None = File(None),
                      poster: UploadFile | None = File(None), db: Session = Depends(get_db)):
@@ -158,7 +165,7 @@ async def _save(n: Notice, kind, title, body, link, on_date, active, file):
         n.image = new
 
 
-@router.post("/notices", dependencies=[Depends(require_admin)])
+@router.post("/notices", dependencies=[Depends(require_persatuan_admin)])
 async def add_notice(kind: str = Form("pengumuman"), title: str = Form(...), body: str = Form(""), link: str = Form(""),
                      on_date: str = Form(""), active: bool = Form(True), file: UploadFile | None = File(None),
                      db: Session = Depends(get_db)):
@@ -169,7 +176,7 @@ async def add_notice(kind: str = Form("pengumuman"), title: str = Form(...), bod
     return _out(n)
 
 
-@router.put("/notices/{nid}", dependencies=[Depends(require_admin)])
+@router.put("/notices/{nid}", dependencies=[Depends(require_persatuan_admin)])
 async def edit_notice(nid: int, kind: str = Form("pengumuman"), title: str = Form(...), body: str = Form(""),
                       link: str = Form(""), on_date: str = Form(""), active: bool = Form(True),
                       remove_image: bool = Form(False), file: UploadFile | None = File(None),
@@ -185,7 +192,7 @@ async def edit_notice(nid: int, kind: str = Form("pengumuman"), title: str = For
     return _out(n)
 
 
-@router.delete("/notices/{nid}", dependencies=[Depends(require_admin)])
+@router.delete("/notices/{nid}", dependencies=[Depends(require_persatuan_admin)])
 def delete_notice(nid: int, db: Session = Depends(get_db)):
     n = db.get(Notice, nid)
     if n:
@@ -208,7 +215,7 @@ def page(key: str, user: models.User = Depends(get_current_user), db: Session = 
     return {"key": key, "title": PAGES[key], "body": row.body if row else DEFAULT_TEXT[key]}
 
 
-@router.put("/page/{key}", dependencies=[Depends(require_admin)])
+@router.put("/page/{key}", dependencies=[Depends(require_persatuan_admin)])
 def set_page(key: str, data: TextIn, db: Session = Depends(get_db)):
     if key not in PAGES:
         raise HTTPException(404, "Halaman tak jumpa")
@@ -228,7 +235,7 @@ def send_feedback(data: FeedbackIn, user: models.User = Depends(get_current_user
     return {"ok": True}
 
 
-@router.get("/feedback", dependencies=[Depends(require_admin)])
+@router.get("/feedback", dependencies=[Depends(require_persatuan_admin)])
 def list_feedback(db: Session = Depends(get_db)):
     rows = db.query(Feedback).order_by(Feedback.id.desc()).limit(200).all()
     out = []
@@ -239,7 +246,7 @@ def list_feedback(db: Session = Depends(get_db)):
     return out
 
 
-@router.put("/feedback/{fid}", dependencies=[Depends(require_admin)])
+@router.put("/feedback/{fid}", dependencies=[Depends(require_persatuan_admin)])
 def mark_feedback(fid: int, read: bool = True, db: Session = Depends(get_db)):
     f = db.get(Feedback, fid)
     if f:
