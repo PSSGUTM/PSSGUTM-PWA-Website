@@ -4,7 +4,7 @@ import { api, auth, fmtDate } from "../api.js";
 import { DESTS, FavPicker, loadFav } from "../components/FrontShell.jsx";
 import { imgUrl } from "../formapi.js";
 
-const GRID = ["notifikasi", "direktori", "alumni", "mtbiro", "panduan", "hubungi", "maklum", "sokongan"];
+const GRID = ["merchandise", "notifikasi", "direktori", "alumni", "mtbiro", "panduan", "hubungi", "maklum", "sokongan"];
 
 export default function Beranda() {
   const [fav, setFav] = useState(loadFav());

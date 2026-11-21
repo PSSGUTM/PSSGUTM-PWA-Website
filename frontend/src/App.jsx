@@ -17,7 +17,7 @@ import Persatuan from "./pages/Persatuan.jsx";
 import Hadir from "./pages/Hadir.jsx";
 import FrontShell from "./components/FrontShell.jsx";
 import Beranda from "./pages/Beranda.jsx";
-import { NoticeList, NoticeDetail, TextPage, MaklumBalas, Simpanan } from "./pages/Laman.jsx";
+import { NoticeList, NoticeDetail, TextPage, MaklumBalas, Simpanan, MerchandiseBKU } from "./pages/Laman.jsx";
 import { Direktori, MTBiro } from "./pages/Direktori.jsx";
 import { ProfilSaya, KehadiranSaya } from "./pages/ProfilSaya.jsx";
 import KodQR from "./pages/KodQR.jsx";
@@ -159,6 +159,8 @@ export default function App() {
         <Route path="/kod-qr" element={F("Kod QR", <KodQR />)} />
         <Route path="/hadir/:token" element={F("Kehadiran", <Hadir />)} />
         <Route path="/simpanan" element={F("Simpanan Barang", <Simpanan />)} />
+        <Route path="/merchandise" element={F("Merchandise BKU", <MerchandiseBKU />)} />
+        <Route path="/bku" element={F("Merchandise BKU", <MerchandiseBKU />)} />
         <Route path="/direktori" element={F("Direktori Ahli", <Direktori kind="SG" />)} />
         <Route path="/alumni" element={F("Alumni", <Direktori kind="SSG" />)} />
         <Route path="/mt-biro" element={F("MT dan Biro", <MTBiro />)} />

@@ -23,6 +23,7 @@ export default function Persatuan() {
   if (p.admin) tabs.push(["ahli", "Ahli"], ["tamat", "Tamat"], ["import", "Import"], ["bengkung", "Bengkung"], ["biro", "Biro"], ["laman", "Laman"]);
   if (p.attendance) tabs.push(["hadir", "Kehadiran"]);
   if (p.inventory) tabs.push(["inv", "Inventori"]);
+  if (p.admin || p.merchandise) tabs.push(["bku", "Merchandise (BKU)"]);
   if (tabs.length === 0) return <div className="note small">Bahagian ini untuk admin dan pemegang jawatan sahaja.</div>;
   const cur = tab && tabs.some(([k]) => k === tab) ? tab : tabs[0][0];
   return (
@@ -38,6 +39,7 @@ export default function Persatuan() {
       {cur === "laman" && <Laman />}
       {cur === "hadir" && <Kehadiran />}
       {cur === "inv" && <Inventori />}
+      {cur === "bku" && <MerchandiseBKUAdmin />}
     </div>
   );
 }
@@ -52,6 +54,7 @@ function Ahli() {
   const [res, setRes] = useState(null);
   const [belts] = useLoad("/persatuan/belts");
   const [edit, setEdit] = useState(null);
+  const [reassign, setReassign] = useState(null);
   const load = () => api.get(`/persatuan/people?q=${encodeURIComponent(q)}&kind=${kind}`).then(setRes).catch(fail);
   useEffect(() => { const t = setTimeout(load, 250); return () => clearTimeout(t); }, [q, kind]);
   return (
@@ -65,17 +68,115 @@ function Ahli() {
         <button className="btn ghost" onClick={() => setEdit({ ...EMPTY })}>+ Tambah seorang</button>
       </div>
       {res?.items.map((p) => (
-        <div className="card" key={p.id} onClick={() => setEdit({ ...EMPTY, ...p, belt_id: p.belt_id || "", study_end: p.study_end || "", belt_date: p.belt_date || "" })} style={{ cursor: "pointer" }}>
-          <b>{p.name}</b> {p.due && <span className="badge bad">Tamat pengajian</span>}<br />
-          <span className="small muted">{p.member_no} · {p.kind === "SG" ? `Ahli · ${p.belt || "tiada bengkung"}` : "Alumni"} · {p.email}</span>
+        <div className="card" key={p.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: ".6rem" }}>
+          <div style={{ flex: "1 1 200px", minWidth: 0, cursor: "pointer" }} onClick={() => setEdit({ ...EMPTY, ...p, belt_id: p.belt_id || "", study_end: p.study_end || "", belt_date: p.belt_date || "" })}>
+            <b>{p.name}</b> {p.due && <span className="badge bad">Tamat pengajian</span>}<br />
+            <span className="small muted">{p.member_no} · {p.kind === "SG" ? `Ahli · ${p.belt || "tiada bengkung"}` : "Alumni"} · {p.email}</span>
+          </div>
+          <div style={{ flexShrink: 0, display: "flex", gap: ".4rem" }}>
+            {p.kind === "SG" && p.email && !p.email.endsWith("@pssgutm.local") && (
+              <button className="btn ghost small" onClick={() => setReassign(p)} title="Pindah akaun ke no ahli baharu">
+                🔄 Pindah No Ahli
+              </button>
+            )}
+            <button className="btn ghost small" onClick={() => setEdit({ ...EMPTY, ...p, belt_id: p.belt_id || "", study_end: p.study_end || "", belt_date: p.belt_date || "" })}>
+              Ubah
+            </button>
+          </div>
         </div>
       ))}
-      {edit && <PersonForm init={edit} belts={belts || []} onClose={() => setEdit(null)} onSaved={() => { setEdit(null); load(); toast("Disimpan"); }} onDeleted={() => { setEdit(null); load(); toast("Rekod dipadam"); }} />}
+      {edit && (
+        <PersonForm
+          init={edit}
+          belts={belts || []}
+          onClose={() => setEdit(null)}
+          onSaved={() => { setEdit(null); load(); toast("Disimpan"); }}
+          onDeleted={() => { setEdit(null); load(); toast("Rekod dipadam"); }}
+          onReassign={(p) => { setEdit(null); setReassign(p); }}
+        />
+      )}
+      {reassign && (
+        <ReassignModal
+          person={reassign}
+          onClose={() => setReassign(null)}
+          onDone={() => { setReassign(null); load(); }}
+        />
+      )}
     </div>
   );
 }
 
-function PersonForm({ init, belts, onClose, onSaved, onDeleted }) {
+function ReassignModal({ person, onClose, onDone }) {
+  const toast = useToast();
+  const [toMno, setToMno] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    const cleanTo = toMno.trim().toUpperCase();
+    if (!cleanTo) return alert("Sila masukkan no ahli baharu");
+    if (!confirm(`Sahkan pindah akaun dan emel ${person.email} ke no ahli ${cleanTo}?\n\nNo ahli ${person.member_no} akan direset kepada asal dan sedia didaftarkan semula.`)) return;
+
+    setBusy(true);
+    try {
+      const res = await api.post("/persatuan/members/reassign-account", {
+        from_member_no: person.member_no,
+        to_member_no: cleanTo
+      });
+      toast(res.message || "Akaun berjaya dipindahkan ✅");
+      onDone();
+    } catch (err) {
+      fail(err);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.75)", zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", padding: "1rem" }}>
+      <form className="card" style={{ maxWidth: 480, width: "100%", margin: 0 }} onSubmit={submit}>
+        <h3 style={{ margin: "0 0 .5rem", color: "var(--primary)" }}>🔄 Pindah Akaun & No Ahli</h3>
+        <p className="small muted">
+          Gunakan fungsi ini jika pendaftar tersilap memasukkan nombor ahli orang lain.
+        </p>
+
+        <div style={{ background: "rgba(255,255,255,0.04)", padding: ".8rem", borderRadius: 8, marginBottom: "1rem" }}>
+          <div className="small"><b>No Ahli Asal:</b> <span className="chip">{person.member_no}</span></div>
+          <div className="small" style={{ marginTop: 4 }}><b>Nama Pemilik Semasa:</b> {person.name}</div>
+          <div className="small" style={{ marginTop: 4 }}><b>Emel Google Berdaftar:</b> {person.email}</div>
+        </div>
+
+        <label className="small">
+          <b>Masukkan No Ahli Baharu (Pemilik Sebenar)</b>
+          <input
+            required
+            placeholder="cth: SG2526013"
+            value={toMno}
+            onChange={(e) => setToMno(e.target.value.toUpperCase())}
+            autoFocus
+          />
+        </label>
+
+        <div className="note small" style={{ margin: "0.8rem 0" }}>
+          ℹ️ <b>Kesan selepas pindahan:</b><br />
+          1. Akaun Google ({person.email}), telefon, dan semua rekod kehadiran/bengkung akan berpindah ke nombor ahli baharu ({toMno || "..."}).<br />
+          2. No ahli lama ({person.member_no}) akan direset kepada nama rasmi asal mengikut CSV dan sedia untuk didaftarkan semula oleh pemilik sebenar.
+        </div>
+
+        <div className="actions" style={{ display: "flex", gap: ".5rem" }}>
+          <button className="btn" disabled={busy || !toMno.trim()}>
+            {busy ? "Memindahkan…" : "Sahkan Pindahan"}
+          </button>
+          <button type="button" className="btn ghost" onClick={onClose} disabled={busy}>
+            Batal
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+function PersonForm({ init, belts, onClose, onSaved, onDeleted, onReassign }) {
   const [f, setF] = useState(init);
   const set = (k) => (e) => setF({ ...f, [k]: e.target.type === "checkbox" ? e.target.checked : e.target.value });
   const save = (ev) => {
@@ -89,7 +190,14 @@ function PersonForm({ init, belts, onClose, onSaved, onDeleted }) {
   };
   return (
     <form className="card" onSubmit={save}>
-      <h3>{f.id ? "Kemas kini rekod" : "Tambah rekod"}</h3>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: ".5rem" }}>
+        <h3 style={{ margin: 0 }}>{f.id ? "Kemas kini rekod" : "Tambah rekod"}</h3>
+        {f.id && f.kind === "SG" && f.email && !f.email.endsWith("@pssgutm.local") && onReassign && (
+          <button type="button" className="btn ghost small" onClick={() => onReassign(f)}>
+            🔄 Pindah No Ahli
+          </button>
+        )}
+      </div>
       <label className="small">No. ahli (cth SG2526001)<input value={f.member_no || ""} onChange={set("member_no")} placeholder="Kosongkan jika mahu sistem jana automatik" /></label>
       <label className="small">Nama penuh<input required value={f.name} onChange={set("name")} /></label>
       <label className="small">Emel Google<input required type="email" value={f.email} onChange={set("email")} /></label>
@@ -277,31 +385,58 @@ function Bengkung() {
 }
 
 /* ---------- Biro, seki, jawatan ---------- */
+const BIRO_ORDER = ["BIT", "BKK", "BKU", "BLG", "BMM"];
+
+function sortBiros(list) {
+  if (!list) return [];
+  const tops = list.filter((b) => !b.parent_id);
+  tops.sort((a, b) => {
+    const ia = BIRO_ORDER.indexOf(a.name.toUpperCase());
+    const ib = BIRO_ORDER.indexOf(b.name.toUpperCase());
+    if (ia !== -1 && ib !== -1) return ia - ib;
+    if (ia !== -1) return -1;
+    if (ib !== -1) return 1;
+    return a.name.localeCompare(b.name);
+  });
+  const res = [];
+  tops.forEach((top) => {
+    res.push(top);
+    const sekis = list.filter((b) => b.parent_id === top.id).sort((a, b) => a.name.localeCompare(b.name));
+    res.push(...sekis);
+  });
+  list.filter((b) => b.parent_id && !tops.some((t) => t.id === b.parent_id)).forEach((o) => res.push(o));
+  return res;
+}
+
 function Biro() {
   const [biros, load] = useLoad("/persatuan/biros");
   const [f, setF] = useState({ name: "", parent_id: "" });
   if (!biros) return <p className="muted">Memuatkan…</p>;
   const tops = biros.filter((b) => !b.parent_id);
+  const sorted = sortBiros(biros);
   const save = (b, patch) => api.put(`/persatuan/biros/${b.id}`, { name: b.name, parent_id: b.parent_id, can_attendance: b.can_attendance, can_inventory: b.can_inventory, ...patch }).then(load).catch(fail);
   return (
     <div>
       <div className="card">
         <h3>Biro dan sekretariat (seki)</h3>
         <p className="small muted">Pemegang jawatan semasa dalam biro (atau seki di bawahnya) yang diberi kebenaran boleh urus kehadiran atau inventori.</p>
-        {biros.map((b) => (
-          <div className="row small" key={b.id} style={b.parent_id ? { paddingLeft: 18 } : null}>
-            <span><b>{b.name}</b>{b.parent_id ? ` (seki, ${biros.find((x) => x.id === b.parent_id)?.name || ""})` : ""}</span>
-            <span className="seg">
+        {sorted.map((b) => (
+          <div key={b.id} style={{ display: "flex", flexWrap: "wrap", justifyContent: "space-between", alignItems: "center", gap: ".6rem", padding: ".7rem 0", borderBottom: "1px solid var(--line)", ...(b.parent_id ? { paddingLeft: 18 } : {}) }}>
+            <div style={{ flex: "1 1 120px", minWidth: 100 }}>
+              <b style={{ fontSize: "1rem" }}>{b.name}</b>
+              {b.parent_id && <span className="small muted"> (seki bawah {biros.find((x) => x.id === b.parent_id)?.name || ""})</span>}
+            </div>
+            <div className="seg" style={{ flexWrap: "wrap", marginLeft: "auto" }}>
               <button className={b.can_attendance ? "on" : ""} onClick={() => save(b, { can_attendance: !b.can_attendance })}>Kehadiran</button>
               <button className={b.can_inventory ? "on" : ""} onClick={() => save(b, { can_inventory: !b.can_inventory })}>Inventori</button>
               <button onClick={() => { const n = prompt("Nama baharu", b.name); if (n && n.trim()) save(b, { name: n }); }}>Ubah</button>
               <button onClick={() => confirm(`Padam ${b.name}?`) && api.del(`/persatuan/biros/${b.id}`).then(load).catch(fail)}>Padam</button>
-            </span>
+            </div>
           </div>
         ))}
-        <form className="row" onSubmit={(e) => { e.preventDefault(); api.post("/persatuan/biros", { name: f.name, parent_id: f.parent_id ? Number(f.parent_id) : null }).then(() => { setF({ name: "", parent_id: "" }); load(); }).catch(fail); }}>
-          <input placeholder="Nama biro / seki" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} required />
-          <select value={f.parent_id} onChange={(e) => setF({ ...f, parent_id: e.target.value })}><option value="">Biro</option>{tops.map((b) => <option key={b.id} value={b.id}>Seki bawah {b.name}</option>)}</select>
+        <form className="row" style={{ marginTop: "1rem", flexWrap: "wrap", gap: ".5rem" }} onSubmit={(e) => { e.preventDefault(); api.post("/persatuan/biros", { name: f.name, parent_id: f.parent_id ? Number(f.parent_id) : null }).then(() => { setF({ name: "", parent_id: "" }); load(); }).catch(fail); }}>
+          <input style={{ flex: "1 1 140px" }} placeholder="Nama biro / seki" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} required />
+          <select style={{ flex: "1 1 140px" }} value={f.parent_id} onChange={(e) => setF({ ...f, parent_id: e.target.value })}><option value="">Biro</option>{tops.map((b) => <option key={b.id} value={b.id}>Seki bawah {b.name}</option>)}</select>
           <button className="btn">Tambah</button>
         </form>
       </div>
@@ -364,7 +499,7 @@ function Kehadiran() {
   if (sel) return <KehadiranDetail id={sel} onBack={() => { setSel(null); load(); }} />;
   return (
     <div>
-      <form className="card" onSubmit={(e) => { e.preventDefault(); api.post("/persatuan/attendances", f).then((a) => { toast("Dicipta"); setSel(a.id); }).catch(fail); }}>
+      <form className="card" onSubmit={(e) => { e.preventDefault(); api.post("/persatuan/attendances", f).then((a) => { toast(a.count > 0 ? "Sesi tarikh ini telah sedia ada / dibuka ✅" : "QR kehadiran dijana ✅"); setSel(a.id); }).catch(fail); }}>
         <h3>Kehadiran baharu</h3>
         <label className="small">Tajuk<input required value={f.title} onChange={(e) => setF({ ...f, title: e.target.value })} /></label>
         <label className="small">Tarikh<input type="date" required value={f.on_date} onChange={(e) => setF({ ...f, on_date: e.target.value })} /></label>
@@ -421,11 +556,27 @@ function Inventori() {
   const toast = useToast();
   const [items, loadItems] = useLoad("/persatuan/inventory/items");
   const [loans, loadLoans] = useLoad("/persatuan/inventory/loans?open_only=false");
+  const [bitPhone, setBitPhone] = useState("0192278390");
   const [nf, setNf] = useState({ name: "", category: "", total: 1, note: "", active: true });
   const [lend, setLend] = useState(null);   // item
   const fileRefs = useRef({});
   const reload = () => { loadItems(); loadLoans(); };
   const photo = async (name) => window.open(await api.blobUrl(`/persatuan/inventory/photo/${name}`), "_blank");
+
+  useEffect(() => {
+    api.get("/persatuan/inventory/bit-contact").then((r) => { if (r.bit_phone) setBitPhone(r.bit_phone); }).catch(() => {});
+  }, []);
+
+  const updateBitPhone = async () => {
+    const val = prompt("Masukkan nombor WhatsApp wakil BIT untuk pinjaman barang:", bitPhone);
+    if (val !== null && val.trim()) {
+      try {
+        await api.put("/persatuan/inventory/bit-contact", { bit_phone: val.trim() });
+        setBitPhone(val.trim());
+        toast("Nombor BIT dikemas kini ✅");
+      } catch (err) { fail(err); }
+    }
+  };
 
   const uploadItemPhoto = async (iid, e) => {
     const f = e.target.files?.[0];
@@ -448,29 +599,55 @@ function Inventori() {
 
   if (!items) return <p className="muted">Memuatkan…</p>;
   const open = (loans || []).filter((l) => !l.returned_at);
+  const cleanBitPhone = (bitPhone || "0192278390").replace(/\D/g, "").replace(/^6/, "");
+
   return (
     <div>
+      <div className="card" style={{ background: "rgba(212,169,78,0.08)", border: "1px solid rgba(212,169,78,0.3)", marginBottom: "1rem" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: ".6rem" }}>
+          <div>
+            <b style={{ color: "var(--primary)" }}>📞 Hubungi BIT / Logistik untuk Urusan Pinjam Barang</b><br />
+            <span className="small muted">Nombor rujukan untuk ahli hubungi: <b>{bitPhone || "0192278390"}</b></span>
+          </div>
+          <div style={{ display: "flex", gap: ".4rem", flexWrap: "wrap" }}>
+            <a
+              className="btn ghost small"
+              href={`https://wa.me/6${cleanBitPhone}?text=${encodeURIComponent("Salam BIT PSSGUTM, saya ingin meminjam barang persatuan.")}`}
+              target="_blank"
+              rel="noreferrer"
+            >
+              💬 WhatsApp BIT
+            </a>
+            <button className="btn ghost small" onClick={updateBitPhone}>
+              ✏️ Tukar No BIT
+            </button>
+          </div>
+        </div>
+      </div>
+
       <div className="card">
         <h3>Barang</h3>
         {items.map((i) => (
-          <div className="row small" key={i.id} style={{ alignItems: "center", gap: ".6rem" }}>
-            {i.image ? (
-              <img src={imgUrl(i.image)} alt="" style={{ width: 40, height: 40, borderRadius: 8, objectFit: "cover", flexShrink: 0, border: "1px solid var(--line)" }} />
-            ) : (
-              <div style={{ width: 40, height: 40, borderRadius: 8, background: "rgba(255,255,255,0.05)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>📦</div>
-            )}
-            <span style={{ flex: 1, minWidth: 0 }}>
-              <b>{i.name}</b> {i.category && <span className="chip">{i.category}</span>}{!i.active && <span className="badge bad">Tidak aktif</span>}<br />
-              Ada {i.available} / {i.total}
-            </span>
-            <span className="seg" style={{ flexShrink: 0, flexWrap: "wrap" }}>
+          <div key={i.id} style={{ display: "flex", flexWrap: "wrap", justifyContent: "space-between", alignItems: "center", gap: ".6rem", padding: ".7rem 0", borderBottom: "1px solid var(--line)" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: ".6rem", flex: "1 1 200px", minWidth: 0 }}>
+              {i.image ? (
+                <img src={imgUrl(i.image)} alt="" style={{ width: 44, height: 44, borderRadius: 8, objectFit: "cover", flexShrink: 0, border: "1px solid var(--line)" }} />
+              ) : (
+                <div style={{ width: 44, height: 44, borderRadius: 8, background: "rgba(255,255,255,0.05)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, fontSize: "1.2rem" }}>📦</div>
+              )}
+              <div style={{ minWidth: 0 }}>
+                <b>{i.name}</b> {i.category && <span className="chip">{i.category}</span>}{!i.active && <span className="badge bad">Tidak aktif</span>}<br />
+                <span className="small muted">Baki ada: <strong style={{ color: "var(--primary)" }}>{i.available}</strong> / {i.total} unit</span>
+              </div>
+            </div>
+            <div className="seg" style={{ flexShrink: 0, flexWrap: "wrap", marginLeft: "auto" }}>
               <button disabled={!i.active || i.available < 1} onClick={() => setLend(i)}>Pinjam</button>
               <button onClick={() => { const t = prompt("Jumlah baharu", i.total); if (t !== null && !isNaN(+t)) api.put(`/persatuan/inventory/items/${i.id}`, { ...i, total: Number(t) }).then(reload).catch(fail); }}>Jumlah</button>
               <input type="file" accept="image/*" style={{ display: "none" }} ref={(el) => (fileRefs.current[i.id] = el)} onChange={(e) => uploadItemPhoto(i.id, e)} />
               <button onClick={() => fileRefs.current[i.id]?.click()}>{i.image ? "📷 Tukar" : "📷 Gambar"}</button>
               {i.image && <button onClick={() => deleteItemPhoto(i.id)} title="Padam gambar">🗑️</button>}
               <button onClick={() => api.put(`/persatuan/inventory/items/${i.id}`, { ...i, active: !i.active }).then(reload).catch(fail)}>{i.active ? "Henti" : "Aktif"}</button>
-            </span>
+            </div>
           </div>
         ))}
         <form onSubmit={(e) => { e.preventDefault(); api.post("/persatuan/inventory/items", { ...nf, total: Number(nf.total) }).then(() => { setNf({ name: "", category: "", total: 1, note: "", active: true }); reload(); toast("Barang ditambah"); }).catch(fail); }}>
@@ -489,7 +666,16 @@ function Inventori() {
       <div className="card">
         <h3>Sejarah pulangan</h3>
         {(loans || []).filter((l) => l.returned_at).slice(0, 40).map((l) => (
-          <div className="row small" key={l.id}><span><b>{l.item}</b> ×{l.qty} · {l.person}<br /><span className="muted">{l.return_note || "tiada nota"}{l.return_photo && <> · <button className="link" onClick={() => photo(l.return_photo)}>gambar pulang</button></>}</span></span></div>
+          <div className="row small" key={l.id} style={{ display: "block", padding: ".5rem 0" }}>
+            <span>
+              <b>{l.item}</b> ×{l.qty} · {l.person}<br />
+              <span className="muted">
+                Mula pinjam: <b>{fmtDate(l.taken_at.slice(0, 10))}</b> · Dipulangkan: <b>{fmtDate(l.returned_at.slice(0, 10))}</b>
+                {l.return_note ? ` · ${l.return_note}` : ""}
+                {l.return_photo && <> · <button className="link" onClick={() => photo(l.return_photo)}>gambar pulang</button></>}
+              </span>
+            </span>
+          </div>
         ))}
       </div>
     </div>
@@ -500,14 +686,18 @@ function LendForm({ item, onClose, onDone }) {
   const [q, setQ] = useState("");
   const [found, setFound] = useState([]);
   const [who, setWho] = useState(null);
-  const [f, setF] = useState({ qty: 1, due_date: "", note: "" });
+  const [f, setF] = useState({ qty: 1, taken_at: new Date().toISOString().slice(0, 10), due_date: "", note: "" });
   const [file, setFile] = useState(null);
   useEffect(() => { if (q.length < 2) return setFound([]); const t = setTimeout(() => api.get(`/persatuan/people/search?q=${encodeURIComponent(q)}`).then(setFound).catch(() => {}), 250); return () => clearTimeout(t); }, [q]);
   const submit = (e) => {
     e.preventDefault();
     const form = new FormData();
-    form.append("item_id", item.id); form.append("person_id", who.id); form.append("qty", f.qty);
-    form.append("due_date", f.due_date); form.append("note", f.note);
+    form.append("item_id", item.id);
+    form.append("person_id", who.id);
+    form.append("qty", f.qty);
+    form.append("taken_at", f.taken_at);
+    form.append("due_date", f.due_date);
+    form.append("note", f.note);
     if (file) form.append("file", file);
     const a = JSON.parse(localStorage.getItem("pssgutm_auth"));
     fetch(`${BASE}/persatuan/inventory/loans`, { method: "POST", headers: { Authorization: `Bearer ${a.token}` }, body: form })
@@ -521,6 +711,7 @@ function LendForm({ item, onClose, onDone }) {
         {found.map((p) => <div className="row small" key={p.id} onClick={() => setWho(p)} style={{ cursor: "pointer" }}><span>{p.name}</span><span className="muted">{p.member_no}</span></div>)}
       </> : <p><b>{who.name}</b> <button type="button" className="link" onClick={() => setWho(null)}>tukar</button></p>}
       <label className="small">Kuantiti (baki {item.available})<input type="number" min="1" max={item.available} value={f.qty} onChange={(e) => setF({ ...f, qty: e.target.value })} /></label>
+      <label className="small">Tarikh mula pinjam<input type="date" required value={f.taken_at} onChange={(e) => setF({ ...f, taken_at: e.target.value })} /></label>
       <label className="small">Tarikh pulang dijangka<input type="date" value={f.due_date} onChange={(e) => setF({ ...f, due_date: e.target.value })} /></label>
       <label className="small">Keadaan barang semasa dipinjam<input value={f.note} onChange={(e) => setF({ ...f, note: e.target.value })} /></label>
       <label className="small">Gambar keadaan barang (pilihan)<input type="file" accept="image/*" onChange={(e) => setFile(e.target.files[0])} /></label>
@@ -543,14 +734,159 @@ function LoanRow({ l, photo, onChange }) {
       .then(async (r) => { if (!r.ok) throw new Error((await r.json()).detail || "Gagal"); onChange(); }).catch(fail);
   };
   return (
-    <div className="row small" style={{ display: "block" }}>
+    <div className="row small" style={{ display: "block", padding: ".6rem 0", borderBottom: "1px solid var(--line)" }}>
       <b>{l.item}</b> ×{l.qty} · {l.person} {l.overdue && <span className="badge bad">Lewat</span>}<br />
-      <span className="muted">Dipinjam {fmtDate(l.taken_at.slice(0, 10))}{l.due_date ? ` · pulang ${fmtDate(l.due_date)}` : ""}{l.taken_note ? ` · ${l.taken_note}` : ""}{l.taken_photo && <> · <button className="link" onClick={() => photo(l.taken_photo)}>gambar pinjam</button></>}</span>
-      {!open ? <div><button className="btn ghost" onClick={() => setOpen(true)}>Rekod pulang</button></div> : (
-        <form onSubmit={back}>
+      <span className="muted">
+        Mula pinjam: <b>{fmtDate(l.taken_at.slice(0, 10))}</b>{l.due_date ? ` · Jangka pulang: ${fmtDate(l.due_date)}` : ""}{l.taken_note ? ` · ${l.taken_note}` : ""}
+        {l.taken_photo && <> · <button className="link" onClick={() => photo(l.taken_photo)}>gambar pinjam</button></>}
+      </span>
+      {!open ? <div style={{ marginTop: ".4rem" }}><button className="btn ghost small" onClick={() => setOpen(true)}>Rekod pulang</button></div> : (
+        <form onSubmit={back} style={{ marginTop: ".5rem" }}>
           <input placeholder="Keadaan barang semasa dipulangkan" value={note} onChange={(e) => setNote(e.target.value)} />
           <input type="file" accept="image/*" onChange={(e) => setFile(e.target.files[0])} />
-          <div className="actions"><button className="btn">Sahkan pulang</button><button type="button" className="btn ghost" onClick={() => setOpen(false)}>Batal</button></div>
+          <div className="actions"><button className="btn small">Sahkan pulang</button><button type="button" className="btn ghost small" onClick={() => setOpen(false)}>Batal</button></div>
+        </form>
+      )}
+    </div>
+  );
+}
+
+/* ---------- Merchandise & Jual Beli BKU (Admin) ---------- */
+function MerchandiseBKUAdmin() {
+  const toast = useToast();
+  const [data, load] = useLoad("/persatuan/bku/merchandise");
+  const [edit, setEdit] = useState(null);
+  const [nf, setNf] = useState({ name: "", category: "Merchandise", price: 0, stock: 1, description: "", contact_phone: "", active: true });
+  const fileRefs = useRef({});
+
+  const uploadPhoto = async (id, e) => {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    try {
+      await api.upload(`/persatuan/bku/merchandise/${id}/image`, f);
+      load();
+      toast("Gambar produk dimuat naik ✅");
+    } catch (err) { fail(err); }
+  };
+
+  const deletePhoto = async (id) => {
+    if (!confirm("Padam gambar produk ini?")) return;
+    try {
+      await api.del(`/persatuan/bku/merchandise/${id}/image`);
+      load();
+      toast("Gambar dipadam");
+    } catch (err) { fail(err); }
+  };
+
+  const remove = async (id, name) => {
+    if (!confirm(`Padam produk '${name}'?`)) return;
+    try {
+      await api.del(`/persatuan/bku/merchandise/${id}`);
+      load();
+      toast("Produk dipadam");
+    } catch (err) { fail(err); }
+  };
+
+  const saveNew = async (e) => {
+    e.preventDefault();
+    try {
+      await api.post("/persatuan/bku/merchandise", {
+        ...nf,
+        price: Number(nf.price || 0),
+        stock: Number(nf.stock || 0)
+      });
+      setNf({ name: "", category: "Merchandise", price: 0, stock: 1, description: "", contact_phone: "", active: true });
+      load();
+      toast("Produk baharu ditambah ✅");
+    } catch (err) { fail(err); }
+  };
+
+  const saveEdit = async (e) => {
+    e.preventDefault();
+    try {
+      await api.put(`/persatuan/bku/merchandise/${edit.id}`, {
+        ...edit,
+        price: Number(edit.price || 0),
+        stock: Number(edit.stock || 0)
+      });
+      setEdit(null);
+      load();
+      toast("Produk dikemas kini ✅");
+    } catch (err) { fail(err); }
+  };
+
+  if (!data) return <p className="muted">Memuatkan katalog BKU…</p>;
+  const items = data.items || [];
+
+  return (
+    <div>
+      <div className="card" style={{ background: "rgba(212,169,78,0.08)", border: "1px solid rgba(212,169,78,0.3)" }}>
+        <h3 style={{ margin: 0, color: "var(--primary)" }}>🛒 Pengurusan Merchandise & Jual Beli (BKU)</h3>
+        <p className="small muted" style={{ margin: ".4rem 0 0" }}>
+          Urus barangan jualan rasmi PSSGUTM (baju silat, tengkolok, tanjak, sticker, lanyard, dll). Ahli boleh melihat katalog di Laman Muka Depan dan membuat pesanan WhatsApp.
+        </p>
+      </div>
+
+      <div className="card">
+        <h3>Senarai Produk Merchandise ({items.length})</h3>
+        {items.length === 0 && <p className="muted small">Belum ada produk didaftarkan.</p>}
+        {items.map((m) => (
+          <div key={m.id} style={{ display: "flex", flexWrap: "wrap", justifyContent: "space-between", alignItems: "center", gap: ".8rem", padding: ".8rem 0", borderBottom: "1px solid var(--line)" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: ".8rem", flex: "1 1 220px", minWidth: 0 }}>
+              {m.image ? (
+                <img src={imgUrl(m.image)} alt="" style={{ width: 50, height: 50, borderRadius: 8, objectFit: "cover", flexShrink: 0, border: "1px solid var(--line)" }} />
+              ) : (
+                <div style={{ width: 50, height: 50, borderRadius: 8, background: "rgba(255,255,255,0.05)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, fontSize: "1.5rem" }}>🥋</div>
+              )}
+              <div style={{ minWidth: 0 }}>
+                <b>{m.name}</b> {m.category && <span className="chip">{m.category}</span>}{!m.active && <span className="badge bad">Tidak aktif</span>}<br />
+                <span className="small muted">
+                  Harga: <b style={{ color: "var(--primary)" }}>RM{Number(m.price || 0).toFixed(2)}</b> · Stok: <b>{m.stock}</b> · WhatsApp: {m.contact_phone || data.default_phone}
+                </span>
+                {m.description && <p className="small muted" style={{ margin: ".2rem 0 0", whiteSpace: "pre-wrap" }}>{m.description}</p>}
+              </div>
+            </div>
+            <div className="seg" style={{ flexShrink: 0, flexWrap: "wrap", marginLeft: "auto" }}>
+              <button onClick={() => setEdit({ ...m })}>Ubah</button>
+              <input type="file" accept="image/*" style={{ display: "none" }} ref={(el) => (fileRefs.current[m.id] = el)} onChange={(e) => uploadPhoto(m.id, e)} />
+              <button onClick={() => fileRefs.current[m.id]?.click()}>{m.image ? "📷 Gambar" : "+ Gambar"}</button>
+              {m.image && <button onClick={() => deletePhoto(m.id)} title="Padam gambar">🗑️</button>}
+              <button onClick={() => api.put(`/persatuan/bku/merchandise/${m.id}`, { ...m, active: !m.active }).then(load).catch(fail)}>{m.active ? "Nyahaktif" : "Aktifkan"}</button>
+              <button onClick={() => remove(m.id, m.name)} style={{ color: "#e74c3c" }}>Padam</button>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {edit ? (
+        <form className="card" onSubmit={saveEdit}>
+          <h3>Kemas kini: {edit.name}</h3>
+          <label className="small">Nama produk<input required value={edit.name} onChange={(e) => setEdit({ ...edit, name: e.target.value })} /></label>
+          <label className="small">Kategori<input value={edit.category} onChange={(e) => setEdit({ ...edit, category: e.target.value })} placeholder="cth: Pakaian, Tanjak, Cenderamata" /></label>
+          <div style={{ display: "flex", gap: "1rem" }}>
+            <label className="small" style={{ flex: 1 }}>Harga (RM)<input type="number" step="0.5" min="0" required value={edit.price} onChange={(e) => setEdit({ ...edit, price: e.target.value })} /></label>
+            <label className="small" style={{ flex: 1 }}>Baki stok<input type="number" min="0" required value={edit.stock} onChange={(e) => setEdit({ ...edit, stock: e.target.value })} /></label>
+          </div>
+          <label className="small">No. WhatsApp tempahan (pilihan, lalai {data.default_phone})<input value={edit.contact_phone} onChange={(e) => setEdit({ ...edit, contact_phone: e.target.value })} placeholder="cth: 0192278390" /></label>
+          <label className="small">Penerangan / saiz / info produk<textarea rows={3} value={edit.description} onChange={(e) => setEdit({ ...edit, description: e.target.value })} /></label>
+          <label className="check"><input type="checkbox" checked={edit.active} onChange={(e) => setEdit({ ...edit, active: e.target.checked })} /> Aktif (papar kepada ahli)</label>
+          <div className="actions">
+            <button className="btn">Simpan perubahan</button>
+            <button type="button" className="btn ghost" onClick={() => setEdit(null)}>Batal</button>
+          </div>
+        </form>
+      ) : (
+        <form className="card" onSubmit={saveNew}>
+          <h3>+ Tambah Produk Merchandise</h3>
+          <label className="small">Nama produk<input required placeholder="cth: Baju Silat Gayong PSSGUTM / Tanjak" value={nf.name} onChange={(e) => setNf({ ...nf, name: e.target.value })} /></label>
+          <label className="small">Kategori<input placeholder="cth: Pakaian / Aksesori / Cenderamata" value={nf.category} onChange={(e) => setNf({ ...nf, category: e.target.value })} /></label>
+          <div style={{ display: "flex", gap: "1rem" }}>
+            <label className="small" style={{ flex: 1 }}>Harga (RM)<input type="number" step="0.5" min="0" required value={nf.price} onChange={(e) => setNf({ ...nf, price: e.target.value })} /></label>
+            <label className="small" style={{ flex: 1 }}>Baki stok<input type="number" min="0" required value={nf.stock} onChange={(e) => setNf({ ...nf, stock: e.target.value })} /></label>
+          </div>
+          <label className="small">No. WhatsApp tempahan (pilihan, lalai {data.default_phone})<input value={nf.contact_phone} onChange={(e) => setNf({ ...nf, contact_phone: e.target.value })} placeholder="cth: 0192278390" /></label>
+          <label className="small">Penerangan ringkas<textarea rows={2} placeholder="Saiz, warna, maklumat tempahan..." value={nf.description} onChange={(e) => setNf({ ...nf, description: e.target.value })} /></label>
+          <button className="btn">Tambah ke katalog BKU</button>
         </form>
       )}
     </div>

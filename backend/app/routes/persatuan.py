@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 
 from .. import models, storage
 from ..database import get_db
-from ..models_main import (AttendRecord, Attendance, BeltHistory, BeltLevel, Biro, Item, Loan, Person, Post)
+from ..models_main import (AttendRecord, Attendance, BeltHistory, BeltLevel, Biro, Item, Loan, MerchandiseItem, Person, Post)
 from ..security import get_current_user, require_admin
 from ..services import people as pp
 from ..services import booking as svc
@@ -48,7 +48,13 @@ def is_valid_sg_no(mno: str) -> bool:
 
 router = APIRouter(prefix="/persatuan", tags=["persatuan"])
 
-DEFAULT_BIROS = (("BKK", False, False), ("BIT", False, False), ("BLG", True, False))
+DEFAULT_BIROS = (
+    ("BIT", True, True),
+    ("BKK", True, False),
+    ("BKU", True, False),
+    ("BLG", True, True),
+    ("BMM", True, False),
+)
 
 
 def migrate_legacy_members(db: Session) -> None:
@@ -448,13 +454,58 @@ def sync_canonical_roster_and_dedup(db: Session) -> None:
         db.rollback()
 
 
+def dedup_attendances(db: Session) -> None:
+    """Gabungkan sesi kehadiran yang bertarikh sama supaya 1 tarikh hanya ada 1 sesi/QR kod tunggal."""
+    try:
+        from collections import defaultdict
+        all_atts = db.query(Attendance).order_by(Attendance.on_date.desc(), Attendance.id.asc()).all()
+        by_date = defaultdict(list)
+        for a in all_atts:
+            by_date[a.on_date].append(a)
+
+        for on_date, att_list in by_date.items():
+            if len(att_list) <= 1:
+                continue
+            # Master: sesi dengan rekod kehadiran paling banyak, atau ID paling awal
+            counts = {a.id: db.query(AttendRecord).filter_by(attendance_id=a.id).count() for a in att_list}
+            master = max(att_list, key=lambda a: (counts[a.id], -a.id))
+
+            for other in att_list:
+                if other.id == master.id:
+                    continue
+                for rec in db.query(AttendRecord).filter_by(attendance_id=other.id).all():
+                    exists_in_master = db.query(AttendRecord).filter_by(attendance_id=master.id, person_id=rec.person_id).first()
+                    if exists_in_master is None:
+                        rec.attendance_id = master.id
+                    else:
+                        db.delete(rec)
+                db.flush()
+                db.delete(other)
+            db.commit()
+    except Exception:
+        db.rollback()
+
+
 def ensure_seed(db: Session) -> None:
     """Biro asas dan penyelarasan awal. Dijalankan setiap deploy, selamat diulang."""
     try:
-        if db.query(Biro).count() == 0:
-            for name, att, inv in DEFAULT_BIROS:
+        existing_biros = {b.name.upper(): b for b in db.query(Biro).filter(Biro.parent_id.is_(None)).all()}
+        for name, att, inv in DEFAULT_BIROS:
+            if name.upper() not in existing_biros:
                 db.add(Biro(name=name, can_attendance=att, can_inventory=inv))
-            db.commit()
+            else:
+                b = existing_biros[name.upper()]
+                if att and not b.can_attendance:
+                    b.can_attendance = True
+                if inv and not b.can_inventory:
+                    b.can_inventory = True
+        db.commit()
+    except Exception:
+        db.rollback()
+
+    # 0. Cantumkan sesi kehadiran berulang pada tarikh sama
+    try:
+        dedup_attendances(db)
     except Exception:
         db.rollback()
 
@@ -590,6 +641,16 @@ def can(db: Session, user: models.User, flag: str) -> bool:
     cur_sess = pp.session_now(db, svc.today_my())
     if flag == "can_attendance":      # semua pemegang jawatan semasa (jawatankuasa = MT + biro + seki) boleh ambil kehadiran
         return db.query(Post).filter_by(person_id=p.id, session=cur_sess, current=True).first() is not None
+    if flag == "can_merchandise":
+        for post in db.query(Post).filter_by(person_id=p.id, session=cur_sess, current=True):
+            if not post.biro_id:
+                return True
+            b = db.get(Biro, post.biro_id) if post.biro_id else None
+            while b is not None:
+                if "BKU" in b.name.upper() or getattr(b, "can_merchandise", False):
+                    return True
+                b = db.get(Biro, b.parent_id) if b.parent_id else None
+        return False
     for post in db.query(Post).filter_by(person_id=p.id, session=cur_sess, current=True):
         if not post.biro_id:  # Majlis Tertinggi (MT) ada akses penuh (kehadiran & inventori)
             return True
@@ -647,7 +708,8 @@ def me(user: models.User = Depends(get_current_user), db: Session = Depends(get_
     return {"person": person_out(db, p) if p else None, "posts": _posts_out(db, p.id) if p else [],
             "attended": n,
             "perms": {"admin": is_admin, "attendance": can(db, user, "can_attendance") or is_admin,
-                      "inventory": can(db, user, "can_inventory") or is_admin}}
+                      "inventory": can(db, user, "can_inventory") or is_admin,
+                      "merchandise": can(db, user, "can_merchandise") or is_admin}}
 
 
 @router.get("/me/belts")
@@ -931,6 +993,157 @@ def delete_person(pid: int, db: Session = Depends(get_db)):
     db.delete(p)
     db.commit()
     return {"ok": True, "id": pid}
+
+
+class ReassignAccountIn(BaseModel):
+    from_member_no: str
+    to_member_no: str
+
+
+@router.post("/members/reassign-account", dependencies=[Depends(require_persatuan_admin)])
+def reassign_member_account(data: ReassignAccountIn, db: Session = Depends(get_db)):
+    """Pindahkan akaun, emel, dan rekod pengguna dari nombor ahli lama kepada nombor ahli baharu.
+    No. ahli lama diresetkan kepada tetapan asal kanonikal (nama asal CSV, emel placeholder, telefon dikosongkan)
+    supaya pemilik asal nombor lama boleh daftar seperti biasa."""
+    import os, csv
+    from sqlalchemy import or_
+
+    from_mno = re.sub(r"\s+", "", data.from_member_no).upper()
+    to_mno = re.sub(r"\s+", "", data.to_member_no).upper()
+
+    if not from_mno or not to_mno:
+        raise HTTPException(400, "Sila masukkan kedua-dua no. ahli asal dan no. ahli baharu")
+    if from_mno == to_mno:
+        raise HTTPException(400, "No. ahli asal dan no. ahli baharu adalah sama")
+
+    # 1. Muat turun senarai kanonikal untuk nama rasmi
+    csv_candidates = [
+        os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "roster_official.csv"),
+        os.path.join(os.getcwd(), "backend", "app", "data", "roster_official.csv"),
+        os.path.join(os.getcwd(), "app", "data", "roster_official.csv"),
+    ]
+    csv_path = next((p for p in csv_candidates if os.path.exists(p)), None)
+    canonical_map = {}
+    if csv_path:
+        with open(csv_path, "r", encoding="utf-8") as f:
+            for r in csv.DictReader(f):
+                m = (r.get("no ahli") or r.get("member_no") or "").strip().upper()
+                n = (r.get("nama") or r.get("name") or "").strip().upper()
+                g = (r.get("jantina") or r.get("gender") or "L").strip().upper()
+                if m:
+                    canonical_map[m] = {"name": n, "gender": "female" if g == "P" else "male"}
+
+    from_p = db.query(Person).filter_by(member_no=from_mno).first()
+    to_p = db.query(Person).filter_by(member_no=to_mno).first()
+
+    if not from_p:
+        raise HTTPException(404, f"No. ahli asal {from_mno} tidak dijumpai")
+
+    # Jika rekod Person to_p belum ada, wujudkan berdasarkan senarai rasmi
+    if not to_p:
+        c_info = canonical_map.get(to_mno, {})
+        to_p = Person(
+            name=c_info.get("name", to_mno),
+            email=f"{to_mno.lower()}@pssgutm.local",
+            member_no=to_mno,
+            gender=c_info.get("gender", "male"),
+            intake=to_mno[2:6] if (to_mno.startswith("SG") and len(to_mno) >= 6) else "2526",
+            kind="SG"
+        )
+        db.add(to_p)
+        db.flush()
+
+    # 2. Cari akaun User yang berdaftar bagi from_mno atau emel from_p
+    user = db.query(models.User).filter_by(member_no=from_mno).first()
+    if not user and from_p.email and not from_p.email.endswith("@pssgutm.local"):
+        user = db.query(models.User).filter(func.lower(models.User.email) == from_p.email.lower()).first()
+
+    canonical_to = canonical_map.get(to_mno, {})
+    canonical_from = canonical_map.get(from_mno, {})
+
+    target_name = canonical_to.get("name") or to_p.name or (user.name if user else from_p.name)
+
+    # 3. Pindahkan akaun User jika ada
+    if user:
+        clash_user = db.query(models.User).filter(models.User.member_no == to_mno, models.User.id != user.id).first()
+        if clash_user:
+            clash_user.member_no = f"{to_mno}_dup_{clash_user.id}"
+            db.flush()
+
+        user.member_no = to_mno
+        user.name = target_name
+        if canonical_to.get("gender"):
+            user.gender = models.Gender(canonical_to["gender"])
+
+        svc._notify(
+            db,
+            user.id,
+            "member_no",
+            f"Nombor Ahli Dibenarkan: {from_mno} → {to_mno}",
+            f"Pihak pentadbir telah membetulkan nombor ahli akaun anda daripada {from_mno} kepada {to_mno} ({target_name}).\n\n"
+            f"Semua rekod anda telah diselaraskan. Sila gunakan nombor ahli {to_mno} untuk log masuk.",
+            severity="warning",
+            link="/profil-saya",
+            ref=f"mno_reassign_{to_mno}"
+        )
+
+    # 4. Pindahkan rekod berkaitan Person (kehadiran, bengkung, pinjaman) dari from_p ke to_p
+    for r in db.query(AttendRecord).filter_by(person_id=from_p.id).all():
+        exists_in_to = db.query(AttendRecord).filter_by(attendance_id=r.attendance_id, person_id=to_p.id).first()
+        if not exists_in_to:
+            r.person_id = to_p.id
+        else:
+            db.delete(r)
+
+    for bh in db.query(BeltHistory).filter_by(person_id=from_p.id).all():
+        bh.person_id = to_p.id
+
+    for ln in db.query(Loan).filter_by(person_id=from_p.id).all():
+        ln.person_id = to_p.id
+
+    # Kemas kini maklumat to_p
+    saved_email = (user.email if user else None) or (from_p.email if from_p.email and not from_p.email.endswith("@pssgutm.local") else f"{to_mno.lower()}@pssgutm.local")
+    saved_phone = (user.phone if user else None) or from_p.phone
+
+    to_p.name = target_name
+    to_p.email = saved_email
+    to_p.phone = saved_phone or to_p.phone
+    if canonical_to.get("gender"):
+        to_p.gender = canonical_to["gender"]
+    if from_p.college and not to_p.college:
+        to_p.college = from_p.college
+    if from_p.block and not to_p.block:
+        to_p.block = from_p.block
+
+    # 5. RESET from_p (nombor ahli lama) sepenuhnya kepada tetapan asal CSV
+    canon_from_name = canonical_from.get("name") or from_p.name
+    from_p.name = canon_from_name
+    from_p.email = f"{from_mno.lower()}@pssgutm.local"
+    from_p.phone = ""
+    from_p.study_level = ""
+    from_p.college = ""
+    from_p.block = ""
+    from_p.study_end = None
+    if canonical_from.get("gender"):
+        from_p.gender = canonical_from["gender"]
+
+    # Selaraskan MemberRoster bagi kedua-dua nombor
+    sync_person_to_roster(db, to_p)
+
+    roster_from = db.query(models.MemberRoster).filter_by(member_no=from_mno).first()
+    if roster_from:
+        roster_from.name = canon_from_name
+        roster_from.active = True
+        if canonical_from.get("gender") in ("male", "female"):
+            roster_from.gender = models.Gender(canonical_from["gender"])
+
+    db.commit()
+    return {
+        "ok": True,
+        "message": f"Akaun berjaya dipindahkan ke {to_mno} ({target_name}). No. ahli {from_mno} telah direset kepada asal ({canon_from_name}) dan sedia untuk didaftarkan semula.",
+        "from_member": {"member_no": from_mno, "name": from_p.name, "email": from_p.email},
+        "to_member": {"member_no": to_mno, "name": to_p.name, "email": to_p.email}
+    }
 
 
 # ---------------------------------------------------------------- SG -> SSG
@@ -1323,6 +1536,14 @@ def list_att(user: models.User = Depends(need("can_attendance")), db: Session = 
 
 @router.post("/attendances")
 def create_att(data: AttIn, user: models.User = Depends(need("can_attendance")), db: Session = Depends(get_db)):
+    # Semak jika sudah ada sesi kehadiran bagi tarikh ini (1 tarikh = 1 QR kod/sesi)
+    existing = db.query(Attendance).filter_by(on_date=data.on_date).order_by(Attendance.id.asc()).first()
+    if existing is not None:
+        if not existing.open:
+            existing.open = True
+            db.commit()
+        return _att_out(db, existing)
+
     a = Attendance(title=data.title.strip(), on_date=data.on_date, token=secrets.token_urlsafe(12), created_by=user.id)
     db.add(a)
     db.commit()
@@ -1536,7 +1757,8 @@ def loans(open_only: bool = False, user: models.User = Depends(need("can_invento
 
 @router.post("/inventory/loans")
 async def lend(item_id: int = Form(...), person_id: int = Form(...), qty: int = Form(1),
-               due_date: str = Form(""), note: str = Form(""), file: UploadFile | None = File(None),
+               taken_at: str = Form(""), due_date: str = Form(""), note: str = Form(""),
+               file: UploadFile | None = File(None),
                user: models.User = Depends(need("can_inventory")), db: Session = Depends(get_db)):
     it = db.get(Item, item_id)
     if it is None or not it.active or db.get(Person, person_id) is None:
@@ -1545,10 +1767,12 @@ async def lend(item_id: int = Form(...), person_id: int = Form(...), qty: int = 
         raise HTTPException(400, "Kuantiti melebihi baki yang ada")
     try:
         due = pp.parse_date(due_date) if due_date else None
+        taken_d = pp.parse_date(taken_at) if taken_at else None
     except ValueError as e:
         raise HTTPException(400, str(e))
     photo = await save_upload(file, "inv_", images_only=True) if file is not None and file.filename else None
-    l = Loan(item_id=item_id, person_id=person_id, qty=qty, due_date=due, taken_note=note.strip()[:300],
+    start_dt = datetime.combine(taken_d, datetime.utcnow().time()) if taken_d else datetime.utcnow()
+    l = Loan(item_id=item_id, person_id=person_id, qty=qty, taken_at=start_dt, due_date=due, taken_note=note.strip()[:300],
              taken_photo=photo, recorded_by=user.id)
     db.add(l)
     db.commit()
@@ -1673,10 +1897,185 @@ def structure(session: str = "", user: models.User = Depends(get_current_user), 
 
 @router.get("/inventory/list")
 def inventory_list(user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
-    """Senarai barang untuk semua ahli (nama, kategori, baki). Pinjaman diurus oleh pengurus inventori."""
+    """Senarai barang untuk semua ahli (nama, kategori, baki) serta nombor hubungi BIT/logistik."""
     rows = db.query(Item).filter(Item.active.is_(True)).order_by(func.lower(Item.name)).all()
-    return [{"id": i.id, "name": i.name, "category": i.category, "note": i.note, "image": i.image or "",
-             "available": i.total - _out_qty(db, i.id), "total": i.total} for i in rows]
+    items = [{"id": i.id, "name": i.name, "category": i.category, "note": i.note, "image": i.image or "",
+              "available": i.total - _out_qty(db, i.id), "total": i.total} for i in rows]
+
+    bit_setting = db.get(models.Setting, "bit_phone")
+    bit_phone = bit_setting.value.strip() if bit_setting and bit_setting.value else ""
+    bit_contacts = []
+    bit_biros = db.query(Biro).filter(func.upper(Biro.name).in_(["BIT", "BLG", "BIRO INFORMASI & TEKNOLOGI", "BIRO LOGISTIK"])).all()
+    biro_ids = [b.id for b in bit_biros]
+    if biro_ids:
+        posts = (db.query(Post, Person).join(Person, Person.id == Post.person_id)
+                 .filter(Post.biro_id.in_(biro_ids), Post.current.is_(True)).all())
+        for pst, prs in posts:
+            if prs.phone:
+                bit_contacts.append({"name": prs.name, "phone": prs.phone, "title": pst.title or "Wakil BIT"})
+    if not bit_phone and bit_contacts:
+        bit_phone = bit_contacts[0]["phone"]
+    if not bit_phone:
+        bit_phone = "0192278390"
+
+    return {
+        "items": items,
+        "bit_phone": bit_phone,
+        "bit_contacts": bit_contacts,
+    }
+
+
+@router.get("/inventory/bit-contact")
+def get_bit_contact(db: Session = Depends(get_db)):
+    bit_setting = db.get(models.Setting, "bit_phone")
+    bit_phone = bit_setting.value.strip() if bit_setting and bit_setting.value else ""
+    return {"bit_phone": bit_phone or "0192278390"}
+
+
+@router.put("/inventory/bit-contact", dependencies=[Depends(need("can_inventory"))])
+def set_bit_contact(data: dict, db: Session = Depends(get_db)):
+    phone = (data.get("bit_phone") or "").strip()
+    s = db.get(models.Setting, "bit_phone")
+    if s is None:
+        s = models.Setting(key="bit_phone", value=phone)
+        db.add(s)
+    else:
+        s.value = phone
+    db.commit()
+    return {"ok": True, "bit_phone": phone}
+
+
+# ---------------------------------------------------------------- Biro Keusahawanan (BKU) Merchandise & Jual Beli
+
+class MerchandiseIn(BaseModel):
+    name: str = Field(min_length=2, max_length=140)
+    category: str = Field(default="Merchandise", max_length=60)
+    price: float = Field(default=0.0, ge=0.0)
+    stock: int = Field(default=0, ge=0)
+    description: str = Field(default="", max_length=2000)
+    contact_phone: str = Field(default="", max_length=30)
+    active: bool = True
+
+
+def _merch_out(m: MerchandiseItem) -> dict:
+    return {
+        "id": m.id,
+        "name": m.name,
+        "category": m.category,
+        "price": float(m.price or 0.0),
+        "stock": m.stock,
+        "description": m.description or "",
+        "image": m.image or "",
+        "contact_phone": m.contact_phone or "",
+        "active": m.active,
+        "created_at": m.created_at.isoformat() if m.created_at else None,
+    }
+
+
+@router.get("/bku/merchandise")
+def list_merchandise(user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
+    can_manage = can(db, user, "can_merchandise") or is_persatuan_admin(db, user)
+    qs = db.query(MerchandiseItem)
+    if not can_manage:
+        qs = qs.filter(MerchandiseItem.active.is_(True))
+    items = qs.order_by(MerchandiseItem.active.desc(), MerchandiseItem.id.desc()).all()
+
+    bku_setting = db.get(models.Setting, "bku_phone")
+    default_phone = bku_setting.value.strip() if bku_setting and bku_setting.value else ""
+    if not default_phone:
+        bku_biro = db.query(Biro).filter(func.upper(Biro.name).like("%BKU%")).first()
+        if bku_biro:
+            pst = (db.query(Post, Person).join(Person, Person.id == Post.person_id)
+                   .filter(Post.biro_id == bku_biro.id, Post.current.is_(True)).first())
+            if pst and pst[1].phone:
+                default_phone = pst[1].phone
+    if not default_phone:
+        default_phone = "0192278390"
+
+    return {
+        "items": [_merch_out(m) for m in items],
+        "can_manage": can_manage,
+        "default_phone": default_phone,
+    }
+
+
+@router.post("/bku/merchandise", dependencies=[Depends(need("can_merchandise"))])
+def add_merchandise(data: MerchandiseIn, db: Session = Depends(get_db)):
+    m = MerchandiseItem(
+        name=data.name.strip(),
+        category=data.category.strip() or "Merchandise",
+        price=data.price,
+        stock=data.stock,
+        description=data.description.strip(),
+        contact_phone=data.contact_phone.strip(),
+        active=data.active
+    )
+    db.add(m)
+    db.commit()
+    db.refresh(m)
+    return _merch_out(m)
+
+
+@router.put("/bku/merchandise/{mid}", dependencies=[Depends(need("can_merchandise"))])
+def edit_merchandise(mid: int, data: MerchandiseIn, db: Session = Depends(get_db)):
+    m = db.get(MerchandiseItem, mid)
+    if not m:
+        raise HTTPException(404, "Barang merchandise tidak dijumpai")
+    m.name = data.name.strip()
+    m.category = data.category.strip() or "Merchandise"
+    m.price = data.price
+    m.stock = data.stock
+    m.description = data.description.strip()
+    m.contact_phone = data.contact_phone.strip()
+    m.active = data.active
+    db.commit()
+    return _merch_out(m)
+
+
+@router.post("/bku/merchandise/{mid}/image", dependencies=[Depends(need("can_merchandise"))])
+async def upload_merchandise_image(mid: int, file: UploadFile = File(...), db: Session = Depends(get_db)):
+    m = db.get(MerchandiseItem, mid)
+    if not m:
+        raise HTTPException(404, "Barang merchandise tidak dijumpai")
+    if m.image:
+        try:
+            storage.delete(m.image)
+        except Exception:
+            pass
+    name = await save_upload(file, prefix="bku_", images_only=True)
+    m.image = name
+    db.commit()
+    return _merch_out(m)
+
+
+@router.delete("/bku/merchandise/{mid}/image", dependencies=[Depends(need("can_merchandise"))])
+def delete_merchandise_image(mid: int, db: Session = Depends(get_db)):
+    m = db.get(MerchandiseItem, mid)
+    if not m:
+        raise HTTPException(404, "Barang merchandise tidak dijumpai")
+    if m.image:
+        try:
+            storage.delete(m.image)
+        except Exception:
+            pass
+        m.image = None
+        db.commit()
+    return _merch_out(m)
+
+
+@router.delete("/bku/merchandise/{mid}", dependencies=[Depends(need("can_merchandise"))])
+def delete_merchandise(mid: int, db: Session = Depends(get_db)):
+    m = db.get(MerchandiseItem, mid)
+    if not m:
+        raise HTTPException(404, "Barang merchandise tidak dijumpai")
+    if m.image:
+        try:
+            storage.delete(m.image)
+        except Exception:
+            pass
+    db.delete(m)
+    db.commit()
+    return {"ok": True}
 
 
 # ---------------------------------------------------------------- carta organisasi MT & Biro

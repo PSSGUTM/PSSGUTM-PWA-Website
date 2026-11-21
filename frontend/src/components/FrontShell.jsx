@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, NavLink, useNavigate } from "react-router-dom";
 import { api } from "../api.js";
 import { IconAdmin, IconBack, IconBell, IconBook, IconBox, IconBuilding, IconCar, IconChat, IconClock, IconGrad, IconHeart, IconHelp,
-  IconHome, IconLogout, IconMenu, IconPeople, IconPhone, IconQR, IconStar, IconUser } from "./Icons.jsx";
+  IconHome, IconLogout, IconMenu, IconPeople, IconPhone, IconQR, IconShop, IconStar, IconUser } from "./Icons.jsx";
 
 // Semua destinasi muka depan. Empat pertama (lalai) atau pilihan ahli jadi "ikon kegemaran" di atas.
 export const DESTS = [
@@ -10,6 +10,7 @@ export const DESTS = [
   { key: "kehadiran", label: "Kehadiran", to: "/kehadiran", Icon: IconClock },
   { key: "qr", label: "Kod QR", to: "/kod-qr", Icon: IconQR },
   { key: "simpanan", label: "Simpanan Barang", to: "/simpanan", Icon: IconBox },
+  { key: "merchandise", label: "Merchandise BKU", to: "/merchandise", Icon: IconShop },
   { key: "notifikasi", label: "Notifikasi", to: "/notis", Icon: IconBell },
   { key: "direktori", label: "Direktori Ahli", to: "/direktori", Icon: IconPeople },
   { key: "alumni", label: "Alumni", to: "/alumni", Icon: IconGrad },

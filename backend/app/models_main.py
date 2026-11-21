@@ -1,7 +1,7 @@
 """Jadual modul utama PSSGUTM: rekod ahli/alumni, bengkung, jawatan, kehadiran, inventori."""
 from datetime import date, datetime
 
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .database import Base
@@ -158,3 +158,20 @@ class Feedback(Base):
     message: Mapped[str] = mapped_column(String(1500))
     read: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class MerchandiseItem(Base):
+    """Barang jualan / merchandise Biro Keusahawanan (BKU)."""
+    __tablename__ = "merchandise_items"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(140), index=True)
+    category: Mapped[str] = mapped_column(String(60), default="Merchandise")
+    price: Mapped[float] = mapped_column(Float, default=0.0)
+    stock: Mapped[int] = mapped_column(Integer, default=0)
+    description: Mapped[str] = mapped_column(Text, default="")
+    image: Mapped[str | None] = mapped_column(String(255))
+    contact_phone: Mapped[str] = mapped_column(String(30), default="")
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+

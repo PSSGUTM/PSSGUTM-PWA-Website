@@ -70,15 +70,44 @@ export function MaklumBalas() {
 
 export function Simpanan() {
   const [rows, setRows] = useState(null);
+  const [bitPhone, setBitPhone] = useState("0192278390");
   const [canManage, setCan] = useState(false);
   useEffect(() => {
-    api.get("/persatuan/inventory/list").then(setRows).catch(() => setRows([]));
+    api.get("/persatuan/inventory/list").then((res) => {
+      if (Array.isArray(res)) {
+        setRows(res);
+      } else {
+        setRows(res.items || []);
+        if (res.bit_phone) setBitPhone(res.bit_phone);
+      }
+    }).catch(() => setRows([]));
     api.get("/persatuan/me").then((m) => setCan(!!(m.perms.inventory || m.perms.admin))).catch(() => {});
   }, []);
   if (!rows) return <p className="muted">Memuatkan…</p>;
+  const cleanBitPhone = (bitPhone || "0192278390").replace(/\D/g, "").replace(/^6/, "");
   return (
     <div>
-      <div className="note small">Untuk meminjam barang, hubungi pengurus inventori persatuan.{canManage && <> <Link to="/persatuan">Urus inventori</Link></>}</div>
+      <div className="card" style={{ background: "rgba(212,169,78,0.08)", border: "1px solid rgba(212,169,78,0.3)", marginBottom: "1rem" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: ".6rem" }}>
+          <div>
+            <b style={{ color: "var(--primary)" }}>📞 Hubungi BIT / Logistik untuk Pinjam Barang</b><br />
+            <span className="small muted">Untuk urusan pinjaman barang persatuan, sila hubungi wakil BIT: <b>{bitPhone}</b></span>
+          </div>
+          <a
+            className="btn small"
+            href={`https://wa.me/6${cleanBitPhone}?text=${encodeURIComponent("Salam BIT PSSGUTM, saya ingin meminjam barang persatuan.")}`}
+            target="_blank"
+            rel="noreferrer"
+            style={{ textDecoration: "none" }}
+          >
+            💬 WhatsApp BIT
+          </a>
+        </div>
+      </div>
+
+      <div className="note small" style={{ marginBottom: "1rem" }}>
+        Senarai alatan dan stok simpanan persatuan.{canManage && <> <Link to="/persatuan">Urus inventori</Link></>}
+      </div>
       {rows.length === 0 && <p className="muted">Belum ada barang didaftarkan.</p>}
       {rows.map((i) => (
         <div className="card" key={i.id} style={{ display: "flex", gap: ".8rem", alignItems: "center" }}>
@@ -93,6 +122,81 @@ export function Simpanan() {
           </div>
         </div>
       ))}
+    </div>
+  );
+}
+
+export function MerchandiseBKU() {
+  const [data, setData] = useState(null);
+  const [category, setCategory] = useState("");
+  useEffect(() => {
+    api.get("/persatuan/bku/merchandise").then(setData).catch(() => setData({ items: [], can_manage: false, default_phone: "0192278390" }));
+  }, []);
+
+  if (!data) return <p className="muted">Memuatkan katalog merchandise…</p>;
+  const items = data.items || [];
+  const categories = ["Semua", ...Array.from(new Set(items.map((x) => x.category).filter(Boolean)))];
+  const filtered = category && category !== "Semua" ? items.filter((x) => x.category === category) : items;
+
+  return (
+    <div>
+      <div className="card" style={{ background: "rgba(212,169,78,0.08)", border: "1px solid rgba(212,169,78,0.3)", marginBottom: "1rem" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: ".6rem" }}>
+          <div>
+            <h3 style={{ margin: 0, color: "var(--primary)" }}>🛒 Merchandise & Jual Beli BKU</h3>
+            <span className="small muted">Dapatkan barangan rasmi PSSGUTM (pakaian, tanjak, sticker, cenderamata).</span>
+          </div>
+          {data.can_manage && (
+            <Link to="/persatuan" className="btn ghost small">⚙️ Urus Produk (BKU)</Link>
+          )}
+        </div>
+      </div>
+
+      {categories.length > 2 && (
+        <div className="seg" style={{ marginBottom: "1rem", flexWrap: "wrap" }}>
+          {categories.map((c) => (
+            <button key={c} className={(!category && c === "Semua") || category === c ? "on" : ""} onClick={() => setCategory(c === "Semua" ? "" : c)}>
+              {c}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {filtered.length === 0 && <p className="muted">Belum ada produk merchandise didaftarkan.</p>}
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: "1rem" }}>
+        {filtered.map((item) => {
+          const phone = (item.contact_phone || data.default_phone || "0192278390").replace(/\D/g, "").replace(/^6/, "");
+          const waUrl = `https://wa.me/6${phone}?text=${encodeURIComponent(`Salam BKU PSSGUTM, saya berminat untuk membeli: ${item.name} (RM${item.price.toFixed(2)}). Adakah stok masih ada?`)}`;
+          return (
+            <div className="card" key={item.id} style={{ display: "flex", flexDirection: "column", height: "100%", margin: 0 }}>
+              {item.image ? (
+                <img src={imgUrl(item.image)} alt={item.name} style={{ width: "100%", height: 180, objectFit: "cover", borderRadius: 10, border: "1px solid var(--line)", marginBottom: ".8rem" }} />
+              ) : (
+                <div style={{ width: "100%", height: 140, borderRadius: 10, background: "rgba(255,255,255,0.03)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "2.5rem", marginBottom: ".8rem" }}>
+                  🥋
+                </div>
+              )}
+              <div style={{ flex: 1 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: ".5rem" }}>
+                  <b style={{ fontSize: "1.05rem" }}>{item.name}</b>
+                  <b style={{ color: "var(--primary)", fontSize: "1.1rem" }}>RM{Number(item.price || 0).toFixed(2)}</b>
+                </div>
+                {item.category && <span className="chip" style={{ marginTop: ".3rem" }}>{item.category}</span>}
+                {item.description && <p className="small muted" style={{ whiteSpace: "pre-wrap", margin: ".6rem 0" }}>{item.description}</p>}
+                <div className="small muted" style={{ marginTop: ".4rem" }}>
+                  Baki stok: <b>{item.stock > 0 ? `${item.stock} unit` : <span style={{ color: "#e74c3c" }}>Habis</span>}</b>
+                </div>
+              </div>
+              <div style={{ marginTop: "1rem" }}>
+                <a className="btn wide" href={waUrl} target="_blank" rel="noreferrer" style={{ textAlign: "center", textDecoration: "none" }}>
+                  💬 Tempah via WhatsApp
+                </a>
+              </div>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }

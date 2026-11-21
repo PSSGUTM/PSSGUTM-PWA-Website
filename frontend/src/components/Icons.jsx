@@ -22,3 +22,4 @@ export const IconBuilding = () => <svg {...P}><path d="M4 21V9l8-5 8 5v12" /><pa
 export const IconBack = () => <svg {...P}><path d="M15 5l-7 7 7 7" /></svg>;
 export const IconLogout = () => <svg {...P}><path d="M10 4H5v16h5M15 8l4 4-4 4M19 12H9" /></svg>;
 export const IconStar = () => <svg {...P}><path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1L3.2 9.5l6.1-.9z" /></svg>;
+export const IconShop = () => <svg {...P}><path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4zM3 6h18M16 10a4 4 0 0 1-8 0" /></svg>;
